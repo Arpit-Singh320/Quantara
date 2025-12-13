@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import tailwindcssAnimate from "tailwindcss-animate";
 
 export default {
   darkMode: ["class"],
@@ -78,6 +79,13 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        // Marsh McLennan Brand Colors
+        mmc: {
+          navy: "hsl(220, 100%, 18%)",
+          teal: "hsl(180, 70%, 35%)",
+          "navy-light": "hsl(200, 80%, 30%)",
+          "teal-light": "hsl(180, 70%, 45%)",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -111,5 +119,5 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [tailwindcssAnimate],
 } satisfies Config;

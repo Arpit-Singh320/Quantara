@@ -7,29 +7,32 @@
 
 @layer base {
   :root {
+    /* Marsh McLennan Brand Colors - Light Mode */
     --background: 210 20% 98%;
-    --foreground: 222 47% 11%;
+    --foreground: 222 60% 12%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 222 60% 12%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --popover-foreground: 222 60% 12%;
 
-    --primary: 221 83% 40%;
-    --primary-foreground: 210 40% 98%;
+    /* Marsh McLennan Deep Navy Blue */
+    --primary: 220 100% 18%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 215 20% 95%;
-    --secondary-foreground: 222 47% 11%;
+    --secondary: 210 25% 95%;
+    --secondary-foreground: 222 60% 12%;
 
-    --muted: 215 20% 95%;
-    --muted-foreground: 215 16% 47%;
+    --muted: 210 25% 95%;
+    --muted-foreground: 215 20% 45%;
 
-    --accent: 263 70% 58%;
+    /* Marsh McLennan Teal Accent */
+    --accent: 180 70% 35%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive-foreground: 0 0% 100%;
 
     --success: 158 64% 42%;
     --success-foreground: 0 0% 100%;
@@ -39,62 +42,65 @@
 
     --border: 214 32% 91%;
     --input: 214 32% 91%;
-    --ring: 221 83% 40%;
+    --ring: 220 100% 18%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;
 
-    /* Custom tokens */
-    --ai-accent: 263 70% 58%;
-    --ai-accent-muted: 263 60% 96%;
+    /* Custom tokens - Marsh McLennan aligned */
+    --ai-accent: 180 70% 35%;
+    --ai-accent-muted: 180 50% 95%;
     --risk-high: 0 84% 60%;
     --risk-medium: 38 92% 50%;
     --risk-low: 158 64% 42%;
 
-    /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(221, 83%, 40%) 0%, hsl(263, 70%, 58%) 100%);
-    --gradient-card: linear-gradient(180deg, hsl(0, 0%, 100%) 0%, hsl(215, 20%, 98%) 100%);
-    --gradient-ai: linear-gradient(135deg, hsl(263, 70%, 58%) 0%, hsl(280, 80%, 65%) 100%);
+    /* Gradients - Navy to Teal (Marsh McLennan style) */
+    --gradient-primary: linear-gradient(135deg, hsl(220, 100%, 18%) 0%, hsl(200, 80%, 30%) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(0, 0%, 100%) 0%, hsl(210, 25%, 98%) 100%);
+    --gradient-ai: linear-gradient(135deg, hsl(180, 70%, 35%) 0%, hsl(190, 80%, 40%) 100%);
 
     /* Shadows */
-    --shadow-xs: 0 1px 2px 0 hsl(222, 47%, 11%, 0.03);
-    --shadow-sm: 0 1px 3px 0 hsl(222, 47%, 11%, 0.05), 0 1px 2px -1px hsl(222, 47%, 11%, 0.05);
-    --shadow-md: 0 4px 6px -1px hsl(222, 47%, 11%, 0.07), 0 2px 4px -2px hsl(222, 47%, 11%, 0.05);
-    --shadow-lg: 0 10px 15px -3px hsl(222, 47%, 11%, 0.08), 0 4px 6px -4px hsl(222, 47%, 11%, 0.05);
-    --shadow-xl: 0 20px 25px -5px hsl(222, 47%, 11%, 0.1), 0 8px 10px -6px hsl(222, 47%, 11%, 0.05);
-    --shadow-glow: 0 0 40px hsl(221, 83%, 40%, 0.15);
-    --shadow-glow-ai: 0 0 40px hsl(263, 70%, 58%, 0.2);
+    --shadow-xs: 0 1px 2px 0 hsl(222, 60%, 12%, 0.03);
+    --shadow-sm: 0 1px 3px 0 hsl(222, 60%, 12%, 0.05), 0 1px 2px -1px hsl(222, 60%, 12%, 0.05);
+    --shadow-md: 0 4px 6px -1px hsl(222, 60%, 12%, 0.07), 0 2px 4px -2px hsl(222, 60%, 12%, 0.05);
+    --shadow-lg: 0 10px 15px -3px hsl(222, 60%, 12%, 0.08), 0 4px 6px -4px hsl(222, 60%, 12%, 0.05);
+    --shadow-xl: 0 20px 25px -5px hsl(222, 60%, 12%, 0.1), 0 8px 10px -6px hsl(222, 60%, 12%, 0.05);
+    --shadow-glow: 0 0 40px hsl(220, 100%, 18%, 0.15);
+    --shadow-glow-ai: 0 0 40px hsl(180, 70%, 35%, 0.2);
 
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 222 47% 11%;
-    --sidebar-primary: 221 83% 40%;
-    --sidebar-primary-foreground: 210 40% 98%;
-    --sidebar-accent: 215 20% 95%;
-    --sidebar-accent-foreground: 222 47% 11%;
-    --sidebar-border: 214 32% 91%;
-    --sidebar-ring: 221 83% 40%;
+    --sidebar-background: 220 100% 18%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 180 70% 45%;
+    --sidebar-primary-foreground: 220 100% 18%;
+    --sidebar-accent: 220 80% 25%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 220 80% 25%;
+    --sidebar-ring: 180 70% 45%;
   }
 
   .dark {
-    --background: 224 47% 6%;
+    /* Marsh McLennan Brand Colors - Dark Mode */
+    --background: 220 50% 6%;
     --foreground: 210 40% 98%;
 
-    --card: 224 47% 8%;
+    --card: 220 50% 8%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 224 47% 9%;
+    --popover: 220 50% 9%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 217 91% 60%;
-    --primary-foreground: 224 47% 6%;
+    /* Marsh McLennan Navy - lighter for dark mode */
+    --primary: 200 80% 55%;
+    --primary-foreground: 220 50% 6%;
 
-    --secondary: 217 33% 14%;
+    --secondary: 220 40% 14%;
     --secondary-foreground: 210 40% 98%;
 
-    --muted: 217 33% 14%;
+    --muted: 220 40% 14%;
     --muted-foreground: 215 20% 60%;
 
-    --accent: 263 70% 60%;
-    --accent-foreground: 0 0% 100%;
+    /* Marsh McLennan Teal - brighter for dark mode */
+    --accent: 180 70% 50%;
+    --accent-foreground: 220 50% 6%;
 
     --destructive: 0 63% 50%;
     --destructive-foreground: 210 40% 98%;
@@ -105,36 +111,36 @@
     --warning: 38 92% 55%;
     --warning-foreground: 0 0% 100%;
 
-    --border: 217 33% 16%;
-    --input: 217 33% 16%;
-    --ring: 217 91% 60%;
+    --border: 220 40% 16%;
+    --input: 220 40% 16%;
+    --ring: 200 80% 55%;
 
-    --ai-accent: 263 70% 65%;
-    --ai-accent-muted: 263 40% 16%;
+    --ai-accent: 180 70% 55%;
+    --ai-accent-muted: 180 40% 16%;
     --risk-high: 0 72% 55%;
     --risk-medium: 38 92% 55%;
     --risk-low: 158 64% 52%;
 
-    --gradient-primary: linear-gradient(135deg, hsl(217, 91%, 60%) 0%, hsl(263, 70%, 65%) 100%);
-    --gradient-card: linear-gradient(180deg, hsl(224, 47%, 9%) 0%, hsl(224, 47%, 7%) 100%);
-    --gradient-ai: linear-gradient(135deg, hsl(263, 70%, 60%) 0%, hsl(280, 80%, 70%) 100%);
+    --gradient-primary: linear-gradient(135deg, hsl(200, 80%, 55%) 0%, hsl(180, 70%, 50%) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(220, 50%, 9%) 0%, hsl(220, 50%, 7%) 100%);
+    --gradient-ai: linear-gradient(135deg, hsl(180, 70%, 50%) 0%, hsl(190, 80%, 55%) 100%);
 
     --shadow-xs: 0 1px 2px 0 hsl(0, 0%, 0%, 0.2);
     --shadow-sm: 0 1px 3px 0 hsl(0, 0%, 0%, 0.3), 0 1px 2px -1px hsl(0, 0%, 0%, 0.25);
     --shadow-md: 0 4px 6px -1px hsl(0, 0%, 0%, 0.35), 0 2px 4px -2px hsl(0, 0%, 0%, 0.3);
     --shadow-lg: 0 10px 15px -3px hsl(0, 0%, 0%, 0.4), 0 4px 6px -4px hsl(0, 0%, 0%, 0.35);
     --shadow-xl: 0 20px 25px -5px hsl(0, 0%, 0%, 0.5), 0 8px 10px -6px hsl(0, 0%, 0%, 0.4);
-    --shadow-glow: 0 0 60px hsl(217, 91%, 60%, 0.2);
-    --shadow-glow-ai: 0 0 50px hsl(263, 70%, 65%, 0.25);
+    --shadow-glow: 0 0 60px hsl(200, 80%, 55%, 0.2);
+    --shadow-glow-ai: 0 0 50px hsl(180, 70%, 55%, 0.25);
 
-    --sidebar-background: 224 47% 7%;
+    --sidebar-background: 220 50% 7%;
     --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 217 91% 60%;
-    --sidebar-primary-foreground: 224 47% 6%;
-    --sidebar-accent: 217 33% 12%;
+    --sidebar-primary: 180 70% 50%;
+    --sidebar-primary-foreground: 220 50% 6%;
+    --sidebar-accent: 220 40% 12%;
     --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 217 33% 14%;
-    --sidebar-ring: 217 91% 60%;
+    --sidebar-border: 220 40% 14%;
+    --sidebar-ring: 180 70% 50%;
   }
 }
 

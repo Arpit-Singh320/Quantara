@@ -21,6 +21,8 @@ import {
 import { useTheme } from '@/hooks/useTheme';
 import { NavLink } from '@/components/NavLink';
 
+type CalendarEventBadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'secondary';
+
 interface CalendarEvent {
   id: string;
   title: string;
@@ -131,12 +133,12 @@ export default function Calendar() {
       case 'meeting': return 'bg-primary';
       case 'call': return 'bg-success';
       case 'renewal': return 'bg-warning';
-      case 'deadline': return 'bg-danger';
+      case 'deadline': return 'bg-destructive';
       default: return 'bg-muted';
     }
   };
 
-  const getEventTypeBadge = (type: CalendarEvent['type']) => {
+  const getEventTypeBadge = (type: CalendarEvent['type']): CalendarEventBadgeVariant => {
     switch (type) {
       case 'meeting': return 'default';
       case 'call': return 'success';
@@ -191,14 +193,17 @@ export default function Calendar() {
 
   return (
     <div className="min-h-screen bg-background flex">
-      {/* Sidebar */}
-      <aside className="w-16 lg:w-64 border-r border-border bg-card flex flex-col">
-        <div className="p-4 border-b border-border">
+      {/* Sidebar - Marsh McLennan Navy Theme */}
+      <aside className="w-16 lg:w-64 border-r border-sidebar-border bg-sidebar flex flex-col">
+        <div className="p-4 border-b border-sidebar-border">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">Q</span>
+            <div className="w-8 h-8 rounded-lg bg-sidebar-primary flex items-center justify-center">
+              <span className="text-sidebar-primary-foreground font-bold text-sm">Q</span>
             </div>
-            <span className="hidden lg:block font-semibold text-foreground">Quantara</span>
+            <div className="hidden lg:flex flex-col">
+              <span className="font-semibold text-sidebar-foreground">Quantara</span>
+              <span className="text-[10px] text-sidebar-foreground/60">by Marsh McLennan</span>
+            </div>
           </div>
         </div>
         <nav className="flex-1 p-2">
@@ -206,8 +211,9 @@ export default function Calendar() {
             <NavLink
               key={item.path}
               to={item.path}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors mb-1"
-              activeClassName="bg-primary/10 text-primary"
+              end={item.path === '/'}
+              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors mb-1"
+              activeClassName="bg-sidebar-primary text-sidebar-primary-foreground"
             >
               <item.icon className="h-5 w-5" />
               <span className="hidden lg:block">{item.label}</span>
@@ -362,7 +368,7 @@ export default function Calendar() {
                           <p className="text-sm font-medium text-foreground truncate">{event.title}</p>
                           <p className="text-xs text-muted-foreground">{event.date}</p>
                         </div>
-                        <Badge variant={getEventTypeBadge(event.type) as any} className="text-xs ml-2">
+                        <Badge variant={getEventTypeBadge(event.type)} className="text-xs ml-2">
                           {event.type}
                         </Badge>
                       </div>
@@ -390,7 +396,7 @@ export default function Calendar() {
                     <span className="text-sm text-muted-foreground">Renewal</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-danger" />
+                    <div className="w-3 h-3 rounded-full bg-destructive" />
                     <span className="text-sm text-muted-foreground">Deadline</span>
                   </div>
                 </CardContent>
@@ -425,7 +431,7 @@ export default function Calendar() {
           </DialogHeader>
           {selectedEvent && (
             <div className="space-y-4">
-              <Badge variant={getEventTypeBadge(selectedEvent.type) as any}>
+              <Badge variant={getEventTypeBadge(selectedEvent.type)}>
                 {selectedEvent.type}
               </Badge>
 

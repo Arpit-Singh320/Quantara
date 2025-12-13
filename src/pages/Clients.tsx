@@ -139,14 +139,17 @@ export default function Clients() {
 
   return (
     <div className="min-h-screen bg-background flex">
-      {/* Sidebar */}
-      <aside className="w-16 lg:w-64 border-r border-border bg-card flex flex-col">
-        <div className="p-4 border-b border-border">
+      {/* Sidebar - Marsh McLennan Navy Theme */}
+      <aside className="w-16 lg:w-64 border-r border-sidebar-border bg-sidebar flex flex-col">
+        <div className="p-4 border-b border-sidebar-border">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">Q</span>
+            <div className="w-8 h-8 rounded-lg bg-sidebar-primary flex items-center justify-center">
+              <span className="text-sidebar-primary-foreground font-bold text-sm">Q</span>
             </div>
-            <span className="hidden lg:block font-semibold text-foreground">Quantara</span>
+            <div className="hidden lg:flex flex-col">
+              <span className="font-semibold text-sidebar-foreground">Quantara</span>
+              <span className="text-[10px] text-sidebar-foreground/60">by Marsh McLennan</span>
+            </div>
           </div>
         </div>
         <nav className="flex-1 p-2">
@@ -154,8 +157,9 @@ export default function Clients() {
             <NavLink
               key={item.path}
               to={item.path}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors mb-1"
-              activeClassName="bg-primary/10 text-primary"
+              end={item.path === '/'}
+              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors mb-1"
+              activeClassName="bg-sidebar-primary text-sidebar-primary-foreground"
             >
               <item.icon className="h-5 w-5" />
               <span className="hidden lg:block">{item.label}</span>

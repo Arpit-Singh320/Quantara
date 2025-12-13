@@ -16,12 +16,16 @@ const queryClient = new QueryClient();
 const App = () => {
   // Initialize dark mode by default
   useEffect(() => {
-    const stored = localStorage.getItem('theme');
+    const stored = localStorage.getItem('quantara-theme') || localStorage.getItem('theme');
     if (!stored) {
+      document.documentElement.classList.remove('light', 'dark');
       document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
+      localStorage.setItem('quantara-theme', 'dark');
     } else {
-      document.documentElement.classList.add(stored);
+      if (stored === 'light' || stored === 'dark') {
+        document.documentElement.classList.remove('light', 'dark');
+        document.documentElement.classList.add(stored);
+      }
     }
   }, []);
 

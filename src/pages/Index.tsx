@@ -16,6 +16,8 @@ import { Renewal, ChatMessage, Source, RiskLevel, SourceType, MeetingAgendaItem,
 import { useTheme } from '@/hooks/useTheme';
 import { useLiveSync } from '@/hooks/useLiveSync';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { useAIChat } from '@/hooks/useAIChat';
+import { NavLink } from '@/components/NavLink';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar } from 'recharts';
@@ -32,38 +34,50 @@ const riskConfig = {
 // ============ SIDEBAR ============
 function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const navItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', active: true },
-    { icon: Users, label: 'Clients' },
-    { icon: FileText, label: 'Policies' },
-    { icon: Calendar, label: 'Calendar' },
-    { icon: BarChart3, label: 'Reports' },
+    { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+    { icon: Users, label: 'Clients', path: '/clients' },
+    { icon: FileText, label: 'Policies', path: '/policies' },
+    { icon: Calendar, label: 'Calendar', path: '/calendar' },
+    { icon: BarChart3, label: 'Reports', path: '/reports' },
   ];
 
   return (
-    <aside className={cn('fixed left-0 top-0 z-40 h-screen border-r bg-sidebar transition-all duration-300', collapsed ? 'w-16' : 'w-56')}>
-      <div className="flex h-16 items-center justify-between px-4 border-b">
+    <aside className={cn('fixed left-0 top-0 z-40 h-screen border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-300', collapsed ? 'w-16' : 'w-56')}>
+      <div className="flex h-16 items-center justify-between px-4 border-b border-sidebar-border">
         {!collapsed && (
           <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center">
-              <Sparkles className="h-4 w-4 text-primary-foreground" />
+            <div className="h-8 w-8 rounded-lg bg-sidebar-primary flex items-center justify-center">
+              <span className="text-sidebar-primary-foreground font-bold text-sm">Q</span>
             </div>
-            <span className="font-semibold text-sm">Quantara</span>
+            <div className="flex flex-col">
+              <span className="font-semibold text-sm text-sidebar-foreground">Quantara</span>
+              <span className="text-[10px] text-sidebar-foreground/60">by Marsh McLennan</span>
+            </div>
           </div>
         )}
-        <Button variant="ghost" size="icon-sm" onClick={onToggle} className={collapsed ? 'mx-auto' : ''}>
+        <Button variant="ghost" size="icon-sm" onClick={onToggle} className={cn('text-sidebar-foreground hover:bg-sidebar-accent', collapsed ? 'mx-auto' : '')}>
           {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
         </Button>
       </div>
       <nav className="p-2 space-y-1">
         {navItems.map((item) => (
-          <button key={item.label} className={cn('flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-colors', item.active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-secondary hover:text-foreground', collapsed && 'justify-center px-0')}>
+          <NavLink
+            key={item.path}
+            to={item.path}
+            end={item.path === '/'}
+            className={cn(
+              'flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
+              collapsed && 'justify-center px-0',
+            )}
+            activeClassName="bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90 hover:text-sidebar-primary-foreground"
+          >
             <item.icon className="h-4 w-4 shrink-0" />
             {!collapsed && <span>{item.label}</span>}
-          </button>
+          </NavLink>
         ))}
       </nav>
       <div className="absolute bottom-4 left-0 right-0 px-2">
-        <button className={cn('flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-muted-foreground hover:bg-secondary transition-colors', collapsed && 'justify-center px-0')}>
+        <button className={cn('flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors', collapsed && 'justify-center px-0')}>
           <Settings className="h-4 w-4" />
           {!collapsed && <span>Settings</span>}
         </button>
@@ -81,11 +95,11 @@ function Header({ onOpenSearch, onOpenChat }: { onOpenSearch: () => void; onOpen
     <header className="sticky top-0 z-30 h-16 border-b bg-background/95 backdrop-blur-sm">
       <div className="flex h-full items-center justify-between px-6">
         <div className="flex items-center gap-4">
-          <h1 className="text-lg font-semibold">Renewal Pipeline</h1>
-          <button onClick={triggerSync} className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-success/10 text-success text-xs font-medium hover:bg-success/20 transition-colors">
-            <span className={cn('h-1.5 w-1.5 rounded-full bg-success', isSyncing && 'animate-pulse-soft')} />
+          <h1 className="text-lg font-semibold text-primary">Renewal Pipeline</h1>
+          <button onClick={triggerSync} className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 transition-colors">
+            <span className={cn('h-1.5 w-1.5 rounded-full bg-accent', isSyncing && 'animate-pulse-soft')} />
             <span>Live</span>
-            <span className="text-success/70">• {relativeTime}</span>
+            <span className="text-accent/70">• {relativeTime}</span>
             <RefreshCw className={cn('h-3 w-3', isSyncing && 'animate-spin')} />
           </button>
         </div>
@@ -109,7 +123,7 @@ function Header({ onOpenSearch, onOpenChat }: { onOpenSearch: () => void; onOpen
             {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
           <div className="ml-2 pl-2 border-l flex items-center gap-2">
-            <div className="h-8 w-8 rounded-full gradient-primary flex items-center justify-center text-xs font-medium text-primary-foreground">MC</div>
+            <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center text-xs font-medium text-primary-foreground">MC</div>
           </div>
         </div>
       </div>
@@ -385,35 +399,28 @@ function BriefModal({ renewal, onClose, onOpenChat }: { renewal: Renewal; onClos
 
 // ============ CHAT INTERFACE ============
 function ChatInterface({ onClose, clientContext }: { onClose: () => void; clientContext?: string }) {
-  const [messages, setMessages] = useState<ChatMessage[]>(mockChatHistory);
   const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const [streamedContent, setStreamedContent] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Use real Gemini AI service
+  const {
+    messages,
+    isTyping,
+    streamedContent,
+    isConfigured,
+    sendMessage,
+    setApiKey,
+  } = useAIChat({ renewals: mockRenewals, clientContext });
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, streamedContent]);
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return;
-    const userMsg: ChatMessage = { id: `m${Date.now()}`, role: 'user', content: input, timestamp: new Date().toISOString() };
-    setMessages(prev => [...prev, userMsg]);
+    const query = input;
     setInput('');
-    setIsTyping(true);
-    setStreamedContent('');
-
-    const response = "Based on my analysis, I found relevant information across your connected systems. The client has shown consistent engagement and there are clear opportunities to strengthen the relationship through tailored coverage recommendations.";
-    let i = 0;
-    const interval = setInterval(() => {
-      if (i < response.length) { setStreamedContent(response.slice(0, i + 1)); i++; }
-      else {
-        clearInterval(interval);
-        setIsTyping(false);
-        setMessages(prev => [...prev, { id: `m${Date.now()}`, role: 'assistant', content: response, sources: [{ id: 'ns1', type: 'salesforce', label: 'CRM Record', timestamp: new Date().toISOString(), relativeTime: 'just now', preview: 'Account activity data' }], timestamp: new Date().toISOString() }]);
-        setStreamedContent('');
-      }
-    }, 15);
+    await sendMessage(query);
   };
 
   return (
