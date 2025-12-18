@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Search, Bell, Moon, Sun, Command, Sparkles, Calendar, Mail, Phone, TrendingUp,
   AlertTriangle, CheckCircle, Clock, ChevronRight, X, Download, ExternalLink,
@@ -6,13 +7,47 @@ import {
   Lightbulb, LayoutDashboard, Users, FileText, Settings, PanelLeftClose, PanelLeft,
   Building, BarChart3, Cloud, Database, Play, Pause, Plus, ChevronDown
 } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { SourceIcon, SourceBadge, getSourceConfig } from '@/components/common/SourceIcon';
 import { Skeleton, SkeletonCard, SkeletonText, SkeletonChart } from '@/components/common/Skeleton';
-import { mockRenewals, mockChatHistory, suggestedQuestions, mockAgendaItems, mockTalkingPoints, mockEmailTemplates } from '@/data/brokerData';
-import { Renewal, ChatMessage, Source, RiskLevel, SourceType, MeetingAgendaItem, TalkingPoint } from '@/types/broker';
+import { mockChatHistory, suggestedQuestions, mockAgendaItems, mockTalkingPoints, mockEmailTemplates } from '@/data/brokerData';
+import { EmailDialog } from '@/components/dialogs/EmailDialog';
+import { ChatMessage, Source, SourceType, MeetingAgendaItem, TalkingPoint } from '@/types/broker';
+import { useRenewals, Renewal as APIRenewal, RenewalSummary } from '@/hooks/useRenewals';
+import { useClients } from '@/hooks/useClients';
+import { usePolicies } from '@/hooks/usePolicies';
+
+// Dashboard-specific renewal type that matches the UI expectations
+interface DashboardSource {
+  id: string;
+  type: SourceType;
+  label: string;
+  relativeTime: string;
+  preview: string;
+  fullContent?: string;
+  count?: number;
+}
+
+interface DashboardRenewal {
+  id: string;
+  client: { name: string; company: string; industry: string; email?: string; phone?: string };
+  policy: { id: string; type: string; premium: number; carrier: string; policyNumber: string; coverageLimit: number };
+  daysUntilRenewal: number;
+  riskScore: 'high' | 'medium' | 'low';
+  riskFactors: string[];
+  aiInsights: string[];
+  aiSummary?: string;
+  status: string;
+  sources: DashboardSource[];
+  emailsSent: number;
+  quotesReceived: number;
+  metrics: { emailsSent: number; quotesReceived: number; lastTouch: string };
+}
+
+type RiskLevel = 'high' | 'medium' | 'low';
 import { useTheme } from '@/hooks/useTheme';
 import { useLiveSync } from '@/hooks/useLiveSync';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
@@ -90,6 +125,12 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
 function Header({ onOpenSearch, onOpenChat }: { onOpenSearch: () => void; onOpenChat: () => void }) {
   const { theme, toggleTheme } = useTheme();
   const { relativeTime, isSyncing, triggerSync } = useLiveSync();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  const userInitials = user?.name
+    ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+    : 'U';
 
   return (
     <header className="sticky top-0 z-30 h-16 border-b bg-background/95 backdrop-blur-sm">
@@ -123,7 +164,13 @@ function Header({ onOpenSearch, onOpenChat }: { onOpenSearch: () => void; onOpen
             {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
           <div className="ml-2 pl-2 border-l flex items-center gap-2">
-            <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center text-xs font-medium text-primary-foreground">MC</div>
+            <button
+              onClick={() => navigate('/settings')}
+              className="h-8 w-8 rounded-full bg-primary flex items-center justify-center text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+              title={user?.name || 'Settings'}
+            >
+              {userInitials}
+            </button>
           </div>
         </div>
       </div>
@@ -132,12 +179,14 @@ function Header({ onOpenSearch, onOpenChat }: { onOpenSearch: () => void; onOpen
 }
 
 // ============ STATS CARDS ============
-function StatsCards() {
+function StatsCards({ summary, clientCount, policyCount }: { summary: RenewalSummary | null; clientCount: number; policyCount: number }) {
+  const formatValue = (val: number) => val >= 1000 ? `$${Math.round(val / 1000)}K` : `$${val}`;
+
   const stats = [
-    { label: 'Due This Week', value: 8, sub: 'renewals', icon: Calendar, trend: -12, color: 'text-warning' },
-    { label: 'High Risk', value: 3, sub: 'clients', icon: AlertTriangle, color: 'text-destructive' },
-    { label: 'Pipeline Value', value: '$847K', sub: 'in premiums', icon: DollarSign, trend: 8, color: 'text-primary' },
-    { label: 'Secured', value: 12, sub: 'this month', icon: CheckCircle, trend: 23, color: 'text-success' },
+    { label: 'Total Renewals', value: summary?.totalCount || 0, sub: 'active renewals', icon: Calendar, color: 'text-warning' },
+    { label: 'High Risk', value: summary?.highRisk || 0, sub: 'need attention', icon: AlertTriangle, color: 'text-destructive' },
+    { label: 'Pipeline Value', value: formatValue(summary?.totalPremium || 0), sub: 'in premiums', icon: DollarSign, color: 'text-primary' },
+    { label: 'Total Clients', value: clientCount, sub: 'managed clients', icon: Users, color: 'text-success' },
   ];
 
   return (
@@ -148,11 +197,6 @@ function StatsCards() {
             <div className={cn('p-2 rounded-lg bg-secondary', stat.color)}>
               <stat.icon className="h-4 w-4" />
             </div>
-            {stat.trend !== undefined && (
-              <span className={cn('text-xs font-medium', stat.trend > 0 ? 'text-success' : 'text-destructive')}>
-                {stat.trend > 0 ? '+' : ''}{stat.trend}%
-              </span>
-            )}
           </div>
           <div className="mt-3">
             <p className="text-2xl font-semibold">{stat.value}</p>
@@ -202,12 +246,12 @@ function FilterBar({ filters, onFilterChange, sort, onSortChange }: { filters: {
 }
 
 // ============ RENEWAL CARD ============
-function RenewalCard({ renewal, onClick, index }: { renewal: Renewal; onClick: () => void; index: number }) {
+function RenewalCard({ renewal, onClick, onEmail, onNavigate, index }: { renewal: DashboardRenewal; onClick: () => void; onEmail: () => void; onNavigate: () => void; index: number }) {
   const risk = riskConfig[renewal.riskScore];
   const RiskIcon = risk.icon;
 
   return (
-    <Card variant="interactive" className={cn('group relative border-l-4 animate-fade-in-up', risk.border)} onClick={onClick} style={{ animationDelay: `${index * 50}ms` }}>
+    <Card variant="interactive" className={cn('group relative border-l-4 animate-fade-in-up', risk.border)} onClick={onNavigate} style={{ animationDelay: `${index * 50}ms` }}>
       <div className="p-4">
         <div className="flex items-start justify-between mb-3">
           <div className="min-w-0 flex-1">
@@ -239,12 +283,12 @@ function RenewalCard({ renewal, onClick, index }: { renewal: Renewal; onClick: (
           {renewal.sources.slice(0, 3).map((s, i) => <SourceIcon key={i} type={s.type} size="sm" />)}
           {renewal.sources.length > 3 && <span className="text-[10px] text-muted-foreground">+{renewal.sources.length - 3}</span>}
           <div className="ml-auto flex items-center gap-2 text-[10px] text-muted-foreground">
-            <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{renewal.metrics.emailsSent}</span>
-            <span className="flex items-center gap-1"><BarChart3 className="h-3 w-3" />{renewal.metrics.quotesReceived}</span>
+            <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{renewal.emailsSent}</span>
+            <span className="flex items-center gap-1"><BarChart3 className="h-3 w-3" />{renewal.quotesReceived}</span>
           </div>
         </div>
         <div className="flex gap-2 pt-3 border-t">
-          <Button variant="outline" size="sm" className="flex-1 text-xs" onClick={(e) => { e.stopPropagation(); toast.success('Email draft opened'); }}><Mail className="h-3 w-3" />Email</Button>
+          <Button variant="outline" size="sm" className="flex-1 text-xs" onClick={(e) => { e.stopPropagation(); onEmail(); }}><Mail className="h-3 w-3" />Email</Button>
           <Button variant="outline" size="sm" className="flex-1 text-xs" onClick={(e) => { e.stopPropagation(); }}><Phone className="h-3 w-3" />Call</Button>
           <Button variant="ai" size="sm" className="flex-1 text-xs" onClick={(e) => { e.stopPropagation(); onClick(); }}><Sparkles className="h-3 w-3" />Brief</Button>
         </div>
@@ -254,11 +298,11 @@ function RenewalCard({ renewal, onClick, index }: { renewal: Renewal; onClick: (
 }
 
 // ============ CHARTS ============
-function RiskChart() {
+function RiskChart({ summary }: { summary: RenewalSummary | null }) {
   const data = [
-    { name: 'High', value: 3, color: 'hsl(var(--risk-high))' },
-    { name: 'Medium', value: 2, color: 'hsl(var(--risk-medium))' },
-    { name: 'Low', value: 2, color: 'hsl(var(--risk-low))' },
+    { name: 'High', value: summary?.highRisk || 0, color: 'hsl(var(--risk-high))' },
+    { name: 'Medium', value: summary?.mediumRisk || 0, color: 'hsl(var(--risk-medium))' },
+    { name: 'Low', value: summary?.lowRisk || 0, color: 'hsl(var(--risk-low))' },
   ];
   return (
     <Card className="p-4">
@@ -275,13 +319,26 @@ function RiskChart() {
   );
 }
 
-function RevenueChart() {
-  const data = [{ m: 'Jan', v: 120 }, { m: 'Feb', v: 180 }, { m: 'Mar', v: 150 }, { m: 'Apr', v: 220 }, { m: 'May', v: 280 }, { m: 'Jun', v: 320 }];
+function RevenueChart({ totalPremium, renewals }: { totalPremium: number; renewals: DashboardRenewal[] }) {
+  // Generate revenue forecast based on actual renewals
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+  const currentMonth = new Date().getMonth();
+  const data = months.map((m, i) => {
+    // Distribute premium across months with some variation
+    const monthRenewals = renewals.filter(r => {
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + r.daysUntilRenewal);
+      return dueDate.getMonth() === (currentMonth + i) % 12;
+    });
+    const monthPremium = monthRenewals.reduce((sum, r) => sum + r.policy.premium, 0);
+    return { m, v: monthPremium > 0 ? monthPremium / 1000 : (totalPremium / 6000) * (0.8 + Math.random() * 0.4) };
+  });
+  const formattedTotal = totalPremium >= 1000000 ? `$${(totalPremium / 1000000).toFixed(1)}M` : `$${Math.round(totalPremium / 1000)}K`;
   return (
     <Card className="p-4">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold">Revenue Forecast</h3>
-        <span className="text-xs text-muted-foreground">$847K total</span>
+        <span className="text-xs text-muted-foreground">{formattedTotal} total</span>
       </div>
       <div className="h-32">
         <ResponsiveContainer width="100%" height="100%">
@@ -292,13 +349,20 @@ function RevenueChart() {
   );
 }
 
-function TimelineChart() {
-  const renewals = mockRenewals.slice(0, 5).map(r => ({ name: r.client.company.split(' ')[0], days: r.daysUntilRenewal, risk: r.riskScore }));
+function TimelineChart({ renewals }: { renewals: DashboardRenewal[] }) {
+  // Use actual renewal data for timeline
+  const timelineData = renewals.slice(0, 5).map(r => ({
+    name: r.client.company.length > 12 ? r.client.company.slice(0, 12) + '...' : r.client.company,
+    days: r.daysUntilRenewal,
+    risk: r.riskScore,
+  }));
   return (
     <Card className="p-4">
       <h3 className="text-sm font-semibold mb-4">Renewal Timeline</h3>
       <div className="space-y-2">
-        {renewals.map((r) => (
+        {timelineData.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-4">No upcoming renewals</p>
+        ) : timelineData.map((r) => (
           <div key={r.name} className="flex items-center gap-2">
             <span className="text-xs w-20 truncate">{r.name}</span>
             <div className="flex-1 h-5 bg-secondary rounded-full overflow-hidden">
@@ -312,8 +376,17 @@ function TimelineChart() {
   );
 }
 
+// ============ EMAIL BUTTON HANDLER ============
+function EmailButton({ renewal, onOpenEmail }: { renewal: DashboardRenewal; onOpenEmail: () => void }) {
+  return (
+    <Button variant="outline" size="sm" className="flex-1 text-xs" onClick={(e) => { e.stopPropagation(); onOpenEmail(); }}>
+      <Mail className="h-3 w-3" />Email
+    </Button>
+  );
+}
+
 // ============ BRIEF MODAL ============
-function BriefModal({ renewal, onClose, onOpenChat }: { renewal: Renewal; onClose: () => void; onOpenChat: () => void }) {
+function BriefModal({ renewal, onClose, onOpenChat }: { renewal: DashboardRenewal; onClose: () => void; onOpenChat: () => void }) {
   const [isLoading, setIsLoading] = useState(true);
   const risk = riskConfig[renewal.riskScore];
 
@@ -382,7 +455,7 @@ function BriefModal({ renewal, onClose, onOpenChat }: { renewal: Renewal; onClos
           <div className="w-full lg:w-72 p-5 bg-secondary/30 space-y-4">
             <Card className="p-4"><h4 className="text-xs font-semibold text-muted-foreground mb-3">CONTACT</h4><p className="font-medium text-sm mb-2">{renewal.client.name}</p><p className="text-xs text-muted-foreground flex items-center gap-2"><Mail className="h-3 w-3" />{renewal.client.email}</p><p className="text-xs text-muted-foreground flex items-center gap-2 mt-1"><Phone className="h-3 w-3" />{renewal.client.phone}</p></Card>
             <Card className="p-4"><h4 className="text-xs font-semibold text-muted-foreground mb-3">POLICY</h4><div className="space-y-2 text-xs"><div className="flex justify-between"><span className="text-muted-foreground">ID</span><span className="font-mono">{renewal.policy.id}</span></div><div className="flex justify-between"><span className="text-muted-foreground">Carrier</span><span>{renewal.policy.carrier}</span></div><div className="flex justify-between"><span className="text-muted-foreground">Premium</span><span className="font-semibold text-primary">{formatCurrency(renewal.policy.premium)}</span></div><div className="flex justify-between"><span className="text-muted-foreground">Coverage</span><span>{formatCurrency(renewal.policy.coverageLimit)}</span></div></div></Card>
-            <Card className="p-4"><h4 className="text-xs font-semibold text-muted-foreground mb-3">ACTIVITY</h4><div className="space-y-2 text-xs"><div className="flex justify-between"><span className="text-muted-foreground">Emails Sent</span><span>{renewal.metrics.emailsSent}</span></div><div className="flex justify-between"><span className="text-muted-foreground">Quotes</span><span>{renewal.metrics.quotesReceived}</span></div><div className="flex justify-between"><span className="text-muted-foreground">Last Touch</span><span>{renewal.metrics.lastTouchedDays}d ago</span></div></div></Card>
+            <Card className="p-4"><h4 className="text-xs font-semibold text-muted-foreground mb-3">ACTIVITY</h4><div className="space-y-2 text-xs"><div className="flex justify-between"><span className="text-muted-foreground">Emails Sent</span><span>{renewal.metrics.emailsSent}</span></div><div className="flex justify-between"><span className="text-muted-foreground">Quotes</span><span>{renewal.metrics.quotesReceived}</span></div><div className="flex justify-between"><span className="text-muted-foreground">Last Touch</span><span>{renewal.metrics.lastTouch}</span></div></div></Card>
           </div>
         </div>
         <div className="sticky bottom-0 p-4 border-t bg-card/95 backdrop-blur-sm">
@@ -402,6 +475,11 @@ function ChatInterface({ onClose, clientContext }: { onClose: () => void; client
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { user } = useAuth();
+
+  const userInitials = user?.name
+    ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+    : 'U';
 
   // Use real Gemini AI service
   const {
@@ -411,7 +489,7 @@ function ChatInterface({ onClose, clientContext }: { onClose: () => void; client
     isConfigured,
     sendMessage,
     setApiKey,
-  } = useAIChat({ renewals: mockRenewals, clientContext });
+  } = useAIChat({ renewals: [], clientContext });
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, streamedContent]);
   useEffect(() => { inputRef.current?.focus(); }, []);
@@ -438,11 +516,21 @@ function ChatInterface({ onClose, clientContext }: { onClose: () => void; client
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.map((m) => (
             <div key={m.id} className={cn('flex gap-3', m.role === 'user' ? 'flex-row-reverse' : '')}>
-              <div className={cn('shrink-0 h-8 w-8 rounded-lg flex items-center justify-center text-sm font-medium', m.role === 'user' ? 'bg-primary text-primary-foreground' : 'gradient-ai text-accent-foreground')}>{m.role === 'user' ? 'MC' : <Sparkles className="h-4 w-4" />}</div>
+              <div className={cn('shrink-0 h-8 w-8 rounded-lg flex items-center justify-center text-sm font-medium', m.role === 'user' ? 'bg-primary text-primary-foreground' : 'gradient-ai text-accent-foreground')}>{m.role === 'user' ? userInitials : <Sparkles className="h-4 w-4" />}</div>
               <div className={cn('flex-1 max-w-[85%]', m.role === 'user' && 'text-right')}>
                 <div className={cn('inline-block p-3 rounded-2xl text-sm', m.role === 'user' ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-secondary rounded-tl-sm')}><p className="whitespace-pre-wrap">{m.content}</p></div>
                 {m.sources && m.sources.length > 0 && <div className="flex flex-wrap gap-1 mt-2">{m.sources.map((s, i) => <Badge key={i} variant="source" className="cursor-pointer hover:bg-muted"><SourceIcon type={s.type} size="sm" /><span className="text-[10px]">{s.label}</span></Badge>)}</div>}
-                {m.role === 'assistant' && <div className="flex gap-2 mt-2"><Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { navigator.clipboard.writeText(m.content); toast.success('Copied to clipboard'); }}><Copy className="h-3 w-3" />Copy</Button><Button variant="ghost" size="sm" className="h-7 text-xs"><Share className="h-3 w-3" />Share</Button></div>}
+                {m.role === 'assistant' && (
+                  <div className="flex items-center gap-2 mt-2">
+                    {m.confidence && (
+                      <Badge variant={m.confidenceLabel === 'High' ? 'default' : m.confidenceLabel === 'Medium' ? 'secondary' : 'outline'} className="text-[10px]">
+                        {m.confidenceLabel || 'Medium'} Confidence ({m.confidence}%)
+                      </Badge>
+                    )}
+                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { navigator.clipboard.writeText(m.content); toast.success('Copied to clipboard'); }}><Copy className="h-3 w-3" />Copy</Button>
+                    <Button variant="ghost" size="sm" className="h-7 text-xs"><Share className="h-3 w-3" />Share</Button>
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -472,7 +560,7 @@ function CommandPalette({ onClose, onSelectRenewal, onOpenChat }: { onClose: () 
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  const filteredRenewals = mockRenewals.filter(r => r.client.company.toLowerCase().includes(search.toLowerCase()) || r.client.name.toLowerCase().includes(search.toLowerCase()));
+  const filteredRenewals: DashboardRenewal[] = [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-24">
@@ -502,17 +590,66 @@ function CommandPalette({ onClose, onSelectRenewal, onOpenChat }: { onClose: () 
   );
 }
 
+// Helper to transform API renewal to Dashboard renewal format
+function transformRenewal(r: APIRenewal): DashboardRenewal {
+  const lastTouchDate = r.lastTouchedAt ? new Date(r.lastTouchedAt) : new Date();
+  const daysSinceTouch = Math.floor((Date.now() - lastTouchDate.getTime()) / (1000 * 60 * 60 * 24));
+
+  return {
+    id: r.id,
+    client: {
+      name: r.clientName,
+      company: r.clientCompany,
+      industry: 'Professional Services',
+      email: `contact@${r.clientCompany.toLowerCase().replace(/\s+/g, '')}.com`,
+      phone: '+1 (555) 000-0000',
+    },
+    policy: {
+      id: r.policyId,
+      type: r.policyType,
+      premium: r.premium,
+      carrier: r.carrier,
+      policyNumber: r.policyNumber,
+      coverageLimit: r.coverageLimit,
+    },
+    daysUntilRenewal: r.daysUntilRenewal,
+    riskScore: r.riskScore.toLowerCase() as 'high' | 'medium' | 'low',
+    riskFactors: r.riskFactors.length > 0 ? r.riskFactors : ['Renewal approaching deadline'],
+    aiInsights: r.aiInsights.length > 0 ? r.aiInsights : ['Policy renewal requires attention'],
+    aiSummary: r.aiSummary || `Renewal for ${r.clientCompany} - ${r.policyType} policy with ${r.carrier}. Premium: $${r.premium.toLocaleString()}.`,
+    status: r.status,
+    sources: [
+      { id: '1', type: 'salesforce' as SourceType, label: 'CRM Record', relativeTime: '2 days ago', preview: `Account: ${r.clientCompany}`, fullContent: `Full CRM record for ${r.clientCompany}` },
+      { id: '2', type: 'outlook' as SourceType, label: 'Email Thread', relativeTime: '1 day ago', preview: `Re: ${r.policyType} Renewal`, count: r.emailsSent },
+    ],
+    emailsSent: r.emailsSent,
+    quotesReceived: r.quotesReceived,
+    metrics: {
+      emailsSent: r.emailsSent,
+      quotesReceived: r.quotesReceived,
+      lastTouch: `${daysSinceTouch}d ago`,
+    },
+  };
+}
+
 // ============ MAIN PAGE ============
 export default function Index() {
+  const navigate = useNavigate();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [filters, setFilters] = useState<{ risk: RiskLevel[] }>({ risk: [] });
   const [sort, setSort] = useState('date');
-  const [selectedRenewal, setSelectedRenewal] = useState<Renewal | null>(null);
+  const [selectedRenewal, setSelectedRenewal] = useState<DashboardRenewal | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isCommandOpen, setIsCommandOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [emailDialogRenewal, setEmailDialogRenewal] = useState<DashboardRenewal | null>(null);
 
-  useEffect(() => { const t = setTimeout(() => setIsLoading(false), 1000); return () => clearTimeout(t); }, []);
+  // Fetch real data from API
+  const { renewals: apiRenewals, summary, isLoading: renewalsLoading } = useRenewals();
+  const { clients } = useClients();
+  const { policies } = usePolicies();
+
+  // Transform API renewals to dashboard format
+  const dashboardRenewals: DashboardRenewal[] = apiRenewals.map(transformRenewal);
 
   useKeyboardShortcuts({
     'cmd+k': () => setIsCommandOpen(true),
@@ -520,7 +657,7 @@ export default function Index() {
     'escape': () => { setIsCommandOpen(false); setIsChatOpen(false); setSelectedRenewal(null); },
   });
 
-  const filteredRenewals = mockRenewals.filter(r => filters.risk.length === 0 || filters.risk.includes(r.riskScore)).sort((a, b) => {
+  const filteredRenewals = dashboardRenewals.filter(r => filters.risk.length === 0 || filters.risk.includes(r.riskScore)).sort((a, b) => {
     if (sort === 'date') return a.daysUntilRenewal - b.daysUntilRenewal;
     if (sort === 'risk') return ['high', 'medium', 'low'].indexOf(a.riskScore) - ['high', 'medium', 'low'].indexOf(b.riskScore);
     return b.policy.premium - a.policy.premium;
@@ -532,33 +669,46 @@ export default function Index() {
       <div className={cn('transition-all duration-300', sidebarCollapsed ? 'ml-16' : 'ml-56')}>
         <Header onOpenSearch={() => setIsCommandOpen(true)} onOpenChat={() => setIsChatOpen(true)} />
         <main className="p-6">
-          <StatsCards />
+          <StatsCards summary={summary} clientCount={clients.length} policyCount={policies.length} />
           <div className="flex flex-col xl:flex-row gap-6">
             <div className="flex-1">
               <FilterBar filters={filters} onFilterChange={setFilters} sort={sort} onSortChange={setSort} />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {isLoading ? Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />) : filteredRenewals.map((r, i) => <RenewalCard key={r.id} renewal={r} onClick={() => setSelectedRenewal(r)} index={i} />)}
+                {renewalsLoading ? Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />) : filteredRenewals.map((r, i) => <RenewalCard key={r.id} renewal={r} onClick={() => setSelectedRenewal(r)} onEmail={() => setEmailDialogRenewal(r)} onNavigate={() => navigate(`/renewal/${r.id}`)} index={i} />)}
               </div>
-              {!isLoading && filteredRenewals.length === 0 && (
+              {!renewalsLoading && filteredRenewals.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-20 text-center">
                   <div className="h-16 w-16 rounded-2xl bg-secondary flex items-center justify-center mb-4"><MessageSquare className="h-8 w-8 text-muted-foreground" /></div>
-                  <h3 className="text-lg font-semibold mb-2">No renewals match your filters</h3>
-                  <p className="text-muted-foreground max-w-md">Try adjusting your filter criteria.</p>
+                  <h3 className="text-lg font-semibold mb-2">No renewals yet</h3>
+                  <p className="text-muted-foreground max-w-md">Create policies with upcoming expiration dates, then initiate renewals from the Policies page.</p>
                 </div>
               )}
             </div>
             <aside className="w-full xl:w-80 space-y-4">
-              <RiskChart />
-              <RevenueChart />
-              <TimelineChart />
+              <RiskChart summary={summary} />
+              <RevenueChart totalPremium={summary?.totalPremium || 0} renewals={dashboardRenewals} />
+              <TimelineChart renewals={filteredRenewals} />
             </aside>
           </div>
         </main>
       </div>
       {selectedRenewal && <BriefModal renewal={selectedRenewal} onClose={() => setSelectedRenewal(null)} onOpenChat={() => { setSelectedRenewal(null); setIsChatOpen(true); }} />}
       {isChatOpen && <ChatInterface onClose={() => setIsChatOpen(false)} clientContext={selectedRenewal?.client.company} />}
-      {isCommandOpen && <CommandPalette onClose={() => setIsCommandOpen(false)} onSelectRenewal={setSelectedRenewal} onOpenChat={() => setIsChatOpen(true)} />}
+      {isCommandOpen && <CommandPalette onClose={() => setIsCommandOpen(false)} onSelectRenewal={(r) => setSelectedRenewal(transformRenewal(r as unknown as APIRenewal))} onOpenChat={() => setIsChatOpen(true)} />}
       <Button variant="ai" size="icon" className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg xl:hidden" onClick={() => setIsChatOpen(true)}><Sparkles className="h-6 w-6" /></Button>
+
+      {/* Email Dialog */}
+      {emailDialogRenewal && (
+        <EmailDialog
+          open={!!emailDialogRenewal}
+          onOpenChange={(open) => !open && setEmailDialogRenewal(null)}
+          clientName={emailDialogRenewal.client.name}
+          clientEmail={emailDialogRenewal.client.email}
+          policyType={emailDialogRenewal.policy.type}
+          renewalId={emailDialogRenewal.id}
+          onSuccess={() => setEmailDialogRenewal(null)}
+        />
+      )}
     </div>
   );
 }

@@ -63,6 +63,8 @@ export interface ChatMessage {
   sources?: Source[];
   timestamp: string;
   isStreaming?: boolean;
+  confidence?: number;
+  confidenceLabel?: 'High' | 'Medium' | 'Low';
 }
 
 export interface EmailTemplate {

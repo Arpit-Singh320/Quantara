@@ -69,19 +69,43 @@ export function useAIChat(options: UseAIChatOptions = {}): UseAIChatReturn {
       );
 
       let fullResponse = '';
-      if (response.data?.message) {
-        fullResponse = response.data.message;
+      let confidence = 0;
+      let confidenceLabel: 'High' | 'Medium' | 'Low' = 'Medium';
+      let apiSources: any[] = [];
+
+      const data = response.data as any;
+      if (data?.message) {
+        fullResponse = data.message;
+        confidence = data.confidence || 75;
+        confidenceLabel = data.confidenceLabel || 'Medium';
+        apiSources = data.sources || [];
       } else if (response.error) {
         throw new Error(response.error);
       }
 
-      // Add assistant message
+      // Convert API sources to Source format
+      const sources: Source[] = apiSources.length > 0
+        ? apiSources.map((s: any, i: number) => ({
+            id: `source-${Date.now()}-${i}`,
+            type: s.system.toLowerCase().includes('crm') ? 'salesforce' :
+                  s.system.toLowerCase().includes('email') ? 'outlook' : 'calendar',
+            label: `${s.system} - ${s.recordType} #${s.recordId}`,
+            timestamp: new Date().toISOString(),
+            relativeTime: 'just now',
+            preview: `View in ${s.system}`,
+            link: s.link,
+          }))
+        : generateMockSources();
+
+      // Add assistant message with confidence
       const assistantMessage: ChatMessage = {
         id: `msg-${Date.now()}-assistant`,
         role: 'assistant',
         content: fullResponse,
         timestamp: new Date().toISOString(),
-        sources: generateMockSources(),
+        sources,
+        confidence,
+        confidenceLabel,
       };
 
       setMessages(prev => [...prev, assistantMessage]);

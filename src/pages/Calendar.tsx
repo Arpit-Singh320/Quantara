@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   ChevronLeft, ChevronRight, Plus, Clock, Users, Video, Phone, MapPin,
-  Moon, Sun, Home, Shield, CalendarDays, BarChart3, MoreHorizontal, Edit, Trash2
+  MoreHorizontal, Edit, Trash2, CalendarDays, Link2, Loader2, ExternalLink
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,8 +19,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useTheme } from '@/hooks/useTheme';
-import { NavLink } from '@/components/NavLink';
+import { AppLayout } from '@/components/layout/AppLayout';
+import { useClients } from '@/hooks/useClients';
+import { AddEventDialog } from '@/components/dialogs/AddEventDialog';
+import { api, CalendarEvent as APICalendarEvent } from '@/services/api';
+import { toast } from 'sonner';
 
 type CalendarEventBadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'secondary';
 
@@ -33,78 +37,118 @@ interface CalendarEvent {
   duration: number;
   location?: string;
   description?: string;
+  source?: 'local' | 'google';
+  htmlLink?: string;
+  meetLink?: string;
+  attendees?: Array<{
+    email: string;
+    displayName?: string;
+    responseStatus?: string;
+    organizer?: boolean;
+  }>;
+  status?: string;
 }
 
-const mockEvents: CalendarEvent[] = [
+interface GoogleCalendarEvent {
+  id: string;
+  title: string;
+  description: string;
+  start: string;
+  end: string;
+  location: string;
+  htmlLink: string;
+  meetLink?: string;
+  source: string;
+  attendees?: Array<{
+    email: string;
+    displayName?: string;
+    responseStatus?: string;
+    organizer?: boolean;
+  }>;
+  creator?: string;
+  organizer?: string;
+  isAllDay?: boolean;
+  status?: string;
+}
+
+// Generate current week dates for mock events
+const today = new Date();
+const getDateString = (daysOffset: number) => {
+  const d = new Date(today);
+  d.setDate(d.getDate() + daysOffset);
+  return d.toISOString().split('T')[0];
+};
+
+const initialMockEvents: CalendarEvent[] = [
   {
-    id: '1',
+    id: 'mock-1',
     title: 'Renewal Review',
     client: 'TechFlow Industries',
     type: 'meeting',
-    date: '2024-12-11',
+    date: getDateString(0),
     time: '09:00',
     duration: 60,
     location: 'Video Call',
     description: 'Annual renewal discussion for GL and Cyber policies',
   },
   {
-    id: '2',
+    id: 'mock-2',
     title: 'Policy Expiration',
     client: 'GreenLeaf Logistics',
     type: 'renewal',
-    date: '2024-12-11',
+    date: getDateString(1),
     time: '00:00',
     duration: 0,
     description: 'Cyber Liability policy expires',
   },
   {
-    id: '3',
+    id: 'mock-3',
     title: 'Quote Follow-up',
     client: 'Summit Healthcare',
     type: 'call',
-    date: '2024-12-12',
+    date: getDateString(1),
     time: '14:00',
     duration: 30,
     description: 'Discuss workers comp quote options',
   },
   {
-    id: '4',
+    id: 'mock-4',
     title: 'Claims Review',
     client: 'Coastal Manufacturing',
     type: 'meeting',
-    date: '2024-12-12',
+    date: getDateString(2),
     time: '10:30',
     duration: 45,
     location: 'Office - Room 3B',
     description: 'Review pending claims and coverage adjustments',
   },
   {
-    id: '5',
+    id: 'mock-5',
     title: 'New Client Onboarding',
     client: 'Atlas Ventures',
     type: 'meeting',
-    date: '2024-12-13',
+    date: getDateString(3),
     time: '11:00',
     duration: 90,
     location: 'Video Call',
     description: 'Initial consultation and needs assessment',
   },
   {
-    id: '6',
+    id: 'mock-6',
     title: 'Submission Deadline',
     client: 'Metro Construction',
     type: 'deadline',
-    date: '2024-12-13',
+    date: getDateString(4),
     time: '17:00',
     duration: 0,
     description: 'Property insurance submission deadline',
   },
   {
-    id: '7',
+    id: 'mock-7',
     title: 'Quarterly Review',
     client: 'TechFlow Industries',
     type: 'meeting',
-    date: '2024-12-14',
+    date: getDateString(5),
     time: '15:00',
     duration: 60,
     location: 'Client Office',
@@ -112,21 +156,211 @@ const mockEvents: CalendarEvent[] = [
   },
 ];
 
-const navItems = [
-  { icon: Home, label: 'Dashboard', path: '/' },
-  { icon: Users, label: 'Clients', path: '/clients' },
-  { icon: Shield, label: 'Policies', path: '/policies' },
-  { icon: CalendarDays, label: 'Calendar', path: '/calendar' },
-  { icon: BarChart3, label: 'Reports', path: '/reports' },
-];
-
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default function Calendar() {
-  const { theme, toggleTheme } = useTheme();
+  const [searchParams] = useSearchParams();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [view, setView] = useState<'week' | 'day'>('week');
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [events, setEvents] = useState<CalendarEvent[]>(initialMockEvents);
+  const [preselectedDate, setPreselectedDate] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleConnected, setIsGoogleConnected] = useState(false);
+  const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
+  const [googleEvents, setGoogleEvents] = useState<CalendarEvent[]>([]);
+
+  const { clients } = useClients();
+
+  // Check if redirected from Google OAuth
+  useEffect(() => {
+    if (searchParams.get('connected') === 'google') {
+      setIsGoogleConnected(true);
+      toast.success('Google Calendar connected successfully!');
+      fetchGoogleCalendarEvents();
+    }
+  }, [searchParams]);
+
+  // Connect to Google Calendar
+  const connectGoogleCalendar = async () => {
+    try {
+      setIsConnectingGoogle(true);
+      const response = await api.getConnectorAuthUrl('google');
+      if (response.data?.authUrl) {
+        // Redirect to Google OAuth
+        window.location.href = response.data.authUrl;
+      } else {
+        toast.error('Failed to get Google auth URL');
+      }
+    } catch (error) {
+      toast.error('Failed to connect to Google Calendar');
+    } finally {
+      setIsConnectingGoogle(false);
+    }
+  };
+
+  // Fetch Google Calendar events
+  const fetchGoogleCalendarEvents = async () => {
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL ||
+        (import.meta.env.PROD ? 'https://backend-production-ceb3.up.railway.app' : 'http://localhost:3001');
+      const token = localStorage.getItem('auth_token');
+
+      // Fetch events for 3 months range
+      const now = new Date();
+      const timeMin = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+      const timeMax = new Date(now.getFullYear(), now.getMonth() + 3, 0).toISOString();
+
+      const response = await fetch(
+        `${apiUrl}/api/connectors/google/calendar/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        // Transform Google events to our format with full details
+        const transformedEvents: CalendarEvent[] = data.events.map((e: GoogleCalendarEvent) => {
+          const startDate = new Date(e.start);
+          const endDate = e.end ? new Date(e.end) : new Date(startDate.getTime() + 60 * 60 * 1000);
+          const durationMinutes = Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60));
+
+          return {
+            id: `google-${e.id}`,
+            title: e.title,
+            client: e.organizer || '',
+            type: 'meeting' as const,
+            date: startDate.toISOString().split('T')[0],
+            time: e.isAllDay ? '00:00' : startDate.toTimeString().slice(0, 5),
+            duration: durationMinutes,
+            location: e.location || (e.meetLink ? 'Google Meet' : ''),
+            description: e.description,
+            source: 'google' as const,
+            htmlLink: e.htmlLink,
+            meetLink: e.meetLink,
+            attendees: e.attendees,
+            status: e.status,
+          };
+        });
+        setGoogleEvents(transformedEvents);
+        setIsGoogleConnected(true);
+      } else if (response.status === 401) {
+        // Token expired or not connected - reset state
+        setIsGoogleConnected(false);
+        setGoogleEvents([]);
+      }
+    } catch (error) {
+      console.error('Failed to fetch Google Calendar events:', error);
+    }
+  };
+
+  // Check Google connection status on mount
+  useEffect(() => {
+    const checkGoogleConnection = async () => {
+      try {
+        const response = await api.getConnectors();
+        if (response.data?.connectors?.google?.connected) {
+          setIsGoogleConnected(true);
+          fetchGoogleCalendarEvents();
+        }
+      } catch (error) {
+        // Ignore - not connected
+      }
+    };
+    checkGoogleConnection();
+  }, []);
+
+  // Fetch events from API on mount
+  const fetchEvents = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const response = await api.getCalendarEvents();
+      if (response.data?.events) {
+        // Merge API events with mock events (mock events have 'mock-' prefix)
+        const apiEvents: CalendarEvent[] = response.data.events.map(e => ({
+          id: e.id,
+          title: e.title,
+          client: e.client || '',
+          type: e.type,
+          date: e.date,
+          time: e.time,
+          duration: e.duration,
+          location: e.location,
+          description: e.description,
+        }));
+        // Keep mock events and add API events
+        setEvents([...initialMockEvents, ...apiEvents]);
+      }
+    } catch (error) {
+      console.error('Failed to fetch calendar events:', error);
+      // Keep using mock events on error
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchEvents();
+  }, [fetchEvents]);
+
+  const handleAddEvent = async (newEvent: CalendarEvent) => {
+    // If it's a mock event (from AddEventDialog), try to persist to API
+    try {
+      const response = await api.createCalendarEvent({
+        title: newEvent.title,
+        description: newEvent.description,
+        type: newEvent.type,
+        date: newEvent.date,
+        time: newEvent.time,
+        duration: newEvent.duration,
+        location: newEvent.location,
+      });
+
+      if (response.data?.event) {
+        // Add the API-created event
+        const apiEvent: CalendarEvent = {
+          id: response.data.event.id,
+          title: response.data.event.title,
+          client: response.data.event.client || newEvent.client,
+          type: response.data.event.type,
+          date: response.data.event.date,
+          time: response.data.event.time,
+          duration: response.data.event.duration,
+          location: response.data.event.location,
+          description: response.data.event.description,
+        };
+        setEvents(prev => [...prev, apiEvent]);
+        toast.success('Event created successfully');
+      } else {
+        // Fallback to local state if API fails
+        setEvents(prev => [...prev, { ...newEvent, id: `local-${Date.now()}` }]);
+        toast.success('Event created (offline mode)');
+      }
+    } catch (error) {
+      // Fallback to local state
+      setEvents(prev => [...prev, { ...newEvent, id: `local-${Date.now()}` }]);
+      toast.success('Event created (offline mode)');
+    }
+  };
+
+  const handleDeleteEvent = async (eventId: string) => {
+    // Don't try to delete mock events from API
+    if (!eventId.startsWith('mock-') && !eventId.startsWith('local-')) {
+      try {
+        await api.deleteCalendarEvent(eventId);
+      } catch (error) {
+        console.error('Failed to delete event from API:', error);
+      }
+    }
+    setEvents(prev => prev.filter(e => e.id !== eventId));
+    setSelectedEvent(null);
+    toast.success('Event deleted successfully');
+  };
 
   const getEventTypeColor = (type: CalendarEvent['type']) => {
     switch (type) {
@@ -176,94 +410,76 @@ export default function Calendar() {
   };
 
   const getEventsForDate = (date: Date) => {
-    return mockEvents.filter(event => event.date === formatDate(date));
+    const dateStr = formatDate(date);
+    const localEvents = events.filter(event => event.date === dateStr);
+    const gEvents = googleEvents.filter(event => event.date === dateStr);
+    return [...localEvents, ...gEvents];
   };
 
-  const todaysEvents = mockEvents.filter(event => {
+  const allEvents = [...events, ...googleEvents];
+
+  const todaysEvents = allEvents.filter(event => {
     const eventDate = new Date(event.date);
-    const today = new Date();
-    return eventDate.toDateString() === today.toDateString();
+    const todayDate = new Date();
+    return eventDate.toDateString() === todayDate.toDateString();
   });
 
-  const upcomingEvents = mockEvents.filter(event => {
+  const upcomingEvents = events.filter(event => {
     const eventDate = new Date(event.date);
-    const today = new Date();
-    return eventDate > today;
+    const todayDate = new Date();
+    return eventDate > todayDate;
   }).slice(0, 5);
 
   return (
-    <div className="min-h-screen bg-background flex">
-      {/* Sidebar - Marsh McLennan Navy Theme */}
-      <aside className="w-16 lg:w-64 border-r border-sidebar-border bg-sidebar flex flex-col">
-        <div className="p-4 border-b border-sidebar-border">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-sidebar-primary flex items-center justify-center">
-              <span className="text-sidebar-primary-foreground font-bold text-sm">Q</span>
-            </div>
-            <div className="hidden lg:flex flex-col">
-              <span className="font-semibold text-sidebar-foreground">Quantara</span>
-              <span className="text-[10px] text-sidebar-foreground/60">by Marsh McLennan</span>
-            </div>
-          </div>
-        </div>
-        <nav className="flex-1 p-2">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              end={item.path === '/'}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors mb-1"
-              activeClassName="bg-sidebar-primary text-sidebar-primary-foreground"
+    <AppLayout
+      title="Calendar"
+      subtitle={selectedDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+      actions={
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="icon" onClick={() => {
+            const newDate = new Date(selectedDate);
+            newDate.setDate(selectedDate.getDate() - 7);
+            setSelectedDate(newDate);
+          }}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setSelectedDate(new Date())}>
+            Today
+          </Button>
+          <Button variant="outline" size="icon" onClick={() => {
+            const newDate = new Date(selectedDate);
+            newDate.setDate(selectedDate.getDate() + 7);
+            setSelectedDate(newDate);
+          }}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          <Button className="gap-2" onClick={() => setShowAddDialog(true)}>
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">New Event</span>
+          </Button>
+          {!isGoogleConnected ? (
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={connectGoogleCalendar}
+              disabled={isConnectingGoogle}
             >
-              <item.icon className="h-5 w-5" />
-              <span className="hidden lg:block">{item.label}</span>
-            </NavLink>
-          ))}
-        </nav>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col">
-        {/* Header */}
-        <header className="h-16 border-b border-border bg-card/80 backdrop-blur-sm flex items-center justify-between px-6">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl font-semibold text-foreground">Calendar</h1>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="icon" onClick={() => {
-                const newDate = new Date(selectedDate);
-                newDate.setDate(selectedDate.getDate() - 7);
-                setSelectedDate(newDate);
-              }}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="text-sm font-medium text-foreground min-w-[140px] text-center">
-                {selectedDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-              </span>
-              <Button variant="outline" size="icon" onClick={() => {
-                const newDate = new Date(selectedDate);
-                newDate.setDate(selectedDate.getDate() + 7);
-                setSelectedDate(newDate);
-              }}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" onClick={() => setSelectedDate(new Date())}>
-              Today
+              {isConnectingGoogle ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Link2 className="h-4 w-4" />
+              )}
+              <span className="hidden sm:inline">Connect Google</span>
             </Button>
-            <Button variant="outline" size="icon" onClick={toggleTheme}>
-              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </Button>
-            <Button className="gap-2">
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">New Event</span>
-            </Button>
-          </div>
-        </header>
-
-        {/* Content */}
-        <div className="flex-1 p-6 overflow-auto">
+          ) : (
+            <Badge variant="outline" className="gap-1 py-1.5 px-3 text-green-600 border-green-600">
+              <Link2 className="h-3 w-3" />
+              Google Connected
+            </Badge>
+          )}
+        </div>
+      }
+    >
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Calendar Grid */}
             <div className="lg:col-span-3">
@@ -294,9 +510,14 @@ export default function Calendar() {
                             <button
                               key={event.id}
                               onClick={() => setSelectedEvent(event)}
-                              className={`w-full text-left p-2 rounded mb-1 text-xs ${getEventTypeColor(event.type)} text-white hover:opacity-90 transition-opacity`}
+                              className={`w-full text-left p-2 rounded mb-1 text-xs ${event.source === 'google' ? 'bg-blue-500' : getEventTypeColor(event.type)} text-white hover:opacity-90 transition-opacity`}
                             >
-                              <p className="font-medium truncate">{event.title}</p>
+                              <div className="flex items-center gap-1">
+                                <p className="font-medium truncate flex-1">{event.title}</p>
+                                {event.source === 'google' && (
+                                  <span className="text-[8px] bg-white/20 px-1 rounded">G</span>
+                                )}
+                              </div>
                               {event.time !== '00:00' && (
                                 <p className="opacity-80">{event.time}</p>
                               )}
@@ -403,43 +624,54 @@ export default function Calendar() {
               </Card>
             </div>
           </div>
-        </div>
-      </main>
-
       {/* Event Detail Dialog */}
       <Dialog open={!!selectedEvent} onOpenChange={() => setSelectedEvent(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <div className="flex items-center justify-between">
-              <DialogTitle>{selectedEvent?.title}</DialogTitle>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon">
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem>
-                    <Edit className="h-4 w-4 mr-2" /> Edit
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className="text-destructive">
-                    <Trash2 className="h-4 w-4 mr-2" /> Delete
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <DialogTitle className="flex items-center gap-2">
+                {selectedEvent?.title}
+                {selectedEvent?.source === 'google' && (
+                  <Badge variant="outline" className="text-blue-600 border-blue-600 text-xs">Google</Badge>
+                )}
+              </DialogTitle>
+              {selectedEvent?.source !== 'google' && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem>
+                      <Edit className="h-4 w-4 mr-2" /> Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="text-destructive">
+                      <Trash2 className="h-4 w-4 mr-2" /> Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
           </DialogHeader>
           {selectedEvent && (
             <div className="space-y-4">
-              <Badge variant={getEventTypeBadge(selectedEvent.type)}>
-                {selectedEvent.type}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant={getEventTypeBadge(selectedEvent.type)}>
+                  {selectedEvent.type}
+                </Badge>
+                {selectedEvent.status && selectedEvent.status !== 'confirmed' && (
+                  <Badge variant="outline" className="text-xs">{selectedEvent.status}</Badge>
+                )}
+              </div>
 
               <div className="space-y-3">
-                <div className="flex items-center gap-3 text-muted-foreground">
-                  <Users className="h-4 w-4" />
-                  <span>{selectedEvent.client}</span>
-                </div>
+                {selectedEvent.client && (
+                  <div className="flex items-center gap-3 text-muted-foreground">
+                    <Users className="h-4 w-4" />
+                    <span>{selectedEvent.client}</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-3 text-muted-foreground">
                   <CalendarDays className="h-4 w-4" />
                   <span>{selectedEvent.date}</span>
@@ -456,16 +688,64 @@ export default function Calendar() {
                     <span>{selectedEvent.location}</span>
                   </div>
                 )}
+                {selectedEvent.meetLink && (
+                  <div className="flex items-center gap-3 text-blue-600">
+                    <Video className="h-4 w-4" />
+                    <a href={selectedEvent.meetLink} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1">
+                      Google Meet Link <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                )}
               </div>
+
+              {/* Attendees */}
+              {selectedEvent.attendees && selectedEvent.attendees.length > 0 && (
+                <div className="pt-3 border-t border-border">
+                  <p className="text-sm font-medium mb-2">Attendees ({selectedEvent.attendees.length})</p>
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {selectedEvent.attendees.map((attendee, idx) => (
+                      <div key={idx} className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground truncate">
+                          {attendee.displayName || attendee.email}
+                        </span>
+                        {attendee.responseStatus && (
+                          <Badge variant="outline" className={`text-xs ${
+                            attendee.responseStatus === 'accepted' ? 'text-green-600 border-green-600' :
+                            attendee.responseStatus === 'declined' ? 'text-red-600 border-red-600' :
+                            attendee.responseStatus === 'tentative' ? 'text-yellow-600 border-yellow-600' :
+                            ''
+                          }`}>
+                            {attendee.responseStatus}
+                          </Badge>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {selectedEvent.description && (
                 <div className="pt-3 border-t border-border">
-                  <p className="text-sm text-muted-foreground">{selectedEvent.description}</p>
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{selectedEvent.description}</p>
                 </div>
               )}
 
               <div className="flex gap-3 pt-3">
-                {selectedEvent.type === 'meeting' && (
+                {selectedEvent.meetLink && (
+                  <Button className="flex-1" asChild>
+                    <a href={selectedEvent.meetLink} target="_blank" rel="noopener noreferrer">
+                      <Video className="h-4 w-4 mr-2" /> Join Meet
+                    </a>
+                  </Button>
+                )}
+                {selectedEvent.htmlLink && (
+                  <Button variant="outline" className="flex-1" asChild>
+                    <a href={selectedEvent.htmlLink} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="h-4 w-4 mr-2" /> Open in Calendar
+                    </a>
+                  </Button>
+                )}
+                {!selectedEvent.meetLink && !selectedEvent.htmlLink && selectedEvent.type === 'meeting' && (
                   <Button className="flex-1">
                     <Video className="h-4 w-4 mr-2" /> Join Meeting
                   </Button>
@@ -475,14 +755,21 @@ export default function Calendar() {
                     <Phone className="h-4 w-4 mr-2" /> Start Call
                   </Button>
                 )}
-                <Button variant="outline" className="flex-1">
-                  View Client
-                </Button>
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
-    </div>
+      {/* Add Event Dialog */}
+      <AddEventDialog
+        open={showAddDialog}
+        onOpenChange={setShowAddDialog}
+        onSuccess={handleAddEvent}
+        clients={clients.map(c => ({ id: c.id, name: c.name, company: c.company }))}
+        preselectedDate={preselectedDate}
+        isGoogleConnected={isGoogleConnected}
+        onGoogleEventCreated={fetchGoogleCalendarEvents}
+      />
+    </AppLayout>
   );
 }

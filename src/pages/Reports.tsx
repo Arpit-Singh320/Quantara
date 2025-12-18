@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Download, Filter, TrendingUp, TrendingDown, DollarSign, Users, Shield,
   Moon, Sun, Home, CalendarDays, BarChart3, FileText, Target, Clock
@@ -16,6 +16,9 @@ import {
 } from '@/components/ui/select';
 import { useTheme } from '@/hooks/useTheme';
 import { NavLink } from '@/components/NavLink';
+import { useRenewals } from '@/hooks/useRenewals';
+import { useClients } from '@/hooks/useClients';
+import { usePolicies } from '@/hooks/usePolicies';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -72,6 +75,65 @@ const navItems = [
 export default function Reports() {
   const { theme, toggleTheme } = useTheme();
   const [timeRange, setTimeRange] = useState('year');
+
+  // Fetch real data from API
+  const { renewals, summary, isLoading: renewalsLoading } = useRenewals();
+  const { clients, isLoading: clientsLoading } = useClients();
+  const { policies, isLoading: policiesLoading } = usePolicies();
+
+  // Calculate real statistics
+  const realStats = useMemo(() => {
+    const totalPremium = policies.reduce((sum, p) => sum + (p.premium || 0), 0);
+    const activeClients = clients.length;
+    const totalRenewals = renewals.length;
+    const completedRenewals = renewals.filter(r => r.status === 'BOUND').length;
+    const renewalRate = totalRenewals > 0 ? ((completedRenewals / totalRenewals) * 100) : 0;
+
+    return {
+      totalPremium,
+      activeClients,
+      renewalRate: renewalRate.toFixed(1),
+      totalRenewals,
+      highRisk: summary?.highRisk || 0,
+      mediumRisk: summary?.mediumRisk || 0,
+      lowRisk: summary?.lowRisk || 0,
+    };
+  }, [policies, clients, renewals, summary]);
+
+  // Generate policy type distribution from real data
+  const realPolicyTypeData = useMemo(() => {
+    const typeCounts: Record<string, number> = {};
+    policies.forEach(p => {
+      const type = p.type || 'Other';
+      typeCounts[type] = (typeCounts[type] || 0) + 1;
+    });
+
+    const colors = [
+      'hsl(var(--primary))',
+      'hsl(var(--success))',
+      'hsl(var(--warning))',
+      'hsl(var(--ai-accent))',
+      'hsl(var(--destructive))',
+    ];
+
+    return Object.entries(typeCounts).map(([name, value], i) => ({
+      name: name.replace(/_/g, ' '),
+      value,
+      color: colors[i % colors.length],
+    }));
+  }, [policies]);
+
+  // Generate risk distribution from real data
+  const realRiskData = useMemo(() => [
+    { name: 'High Risk', value: realStats.highRisk, color: 'hsl(var(--destructive))' },
+    { name: 'Medium Risk', value: realStats.mediumRisk, color: 'hsl(var(--warning))' },
+    { name: 'Low Risk', value: realStats.lowRisk, color: 'hsl(var(--success))' },
+  ], [realStats]);
+
+  // Use real data if available, otherwise fall back to mock
+  const displayPremium = realStats.totalPremium > 0 ? realStats.totalPremium : revenueData.reduce((sum, d) => sum + d.premium, 0);
+  const displayClients = realStats.activeClients > 0 ? realStats.activeClients : 127;
+  const displayRenewalRate = realStats.totalRenewals > 0 ? realStats.renewalRate : '94.2';
 
   const totalPremium = revenueData.reduce((sum, d) => sum + d.premium, 0);
   const totalTarget = revenueData.reduce((sum, d) => sum + d.target, 0);
@@ -145,10 +207,14 @@ export default function Reports() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Total Premium</p>
-                    <p className="text-2xl font-bold text-foreground">${(totalPremium / 1000000).toFixed(1)}M</p>
+                    <p className="text-2xl font-bold text-foreground">
+                      {displayPremium >= 1000000
+                        ? `$${(displayPremium / 1000000).toFixed(1)}M`
+                        : `$${(displayPremium / 1000).toFixed(0)}K`}
+                    </p>
                     <div className="flex items-center gap-1 text-success text-sm">
                       <TrendingUp className="h-3 w-3" />
-                      <span>+18.2%</span>
+                      <span>{policies.length} policies</span>
                     </div>
                   </div>
                   <div className="p-3 rounded-lg bg-primary/10">
@@ -163,10 +229,10 @@ export default function Reports() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Active Clients</p>
-                    <p className="text-2xl font-bold text-foreground">127</p>
+                    <p className="text-2xl font-bold text-foreground">{displayClients}</p>
                     <div className="flex items-center gap-1 text-success text-sm">
                       <TrendingUp className="h-3 w-3" />
-                      <span>+8 this month</span>
+                      <span>{realStats.totalRenewals} renewals</span>
                     </div>
                   </div>
                   <div className="p-3 rounded-lg bg-success/10">
@@ -181,10 +247,10 @@ export default function Reports() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Renewal Rate</p>
-                    <p className="text-2xl font-bold text-foreground">94.2%</p>
+                    <p className="text-2xl font-bold text-foreground">{displayRenewalRate}%</p>
                     <div className="flex items-center gap-1 text-success text-sm">
                       <TrendingUp className="h-3 w-3" />
-                      <span>+2.1%</span>
+                      <span>On track</span>
                     </div>
                   </div>
                   <div className="p-3 rounded-lg bg-warning/10">

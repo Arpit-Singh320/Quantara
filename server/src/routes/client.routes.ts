@@ -3,135 +3,279 @@
  */
 
 import { Router, Response, NextFunction } from 'express';
+import { PrismaClient } from '@prisma/client';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.middleware.js';
 import { createError } from '../middleware/error.middleware.js';
 
 const router = Router();
-
-// Mock client data
-const mockClients = [
-  {
-    id: 'c1',
-    name: 'John Smith',
-    company: 'Acme Corp',
-    email: 'john@acmecorp.com',
-    phone: '(555) 123-4567',
-    industry: 'Manufacturing',
-    totalPremium: 125000,
-    policyCount: 4,
-    riskScore: 'medium',
-    lastContact: '2024-01-28',
-  },
-  {
-    id: 'c2',
-    name: 'Sarah Johnson',
-    company: 'TechStart Inc',
-    email: 'sarah@techstart.io',
-    phone: '(555) 234-5678',
-    industry: 'Technology',
-    totalPremium: 85000,
-    policyCount: 3,
-    riskScore: 'low',
-    lastContact: '2024-01-30',
-  },
-  {
-    id: 'c3',
-    name: 'Mike Davis',
-    company: 'BuildRight LLC',
-    email: 'mike@buildright.com',
-    phone: '(555) 345-6789',
-    industry: 'Construction',
-    totalPremium: 210000,
-    policyCount: 6,
-    riskScore: 'high',
-    lastContact: '2024-01-15',
-  },
-];
+const prisma = new PrismaClient();
 
 // GET /api/clients
-router.get('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
-  const { search, industry, sortBy, order } = req.query;
+router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      next(createError('Unauthorized', 401));
+      return;
+    }
 
-  let filtered = [...mockClients];
+    const { search, industry, sortBy, order } = req.query;
 
-  // Search
-  if (search && typeof search === 'string') {
-    const searchLower = search.toLowerCase();
-    filtered = filtered.filter(c =>
-      c.name.toLowerCase().includes(searchLower) ||
-      c.company.toLowerCase().includes(searchLower) ||
-      c.email.toLowerCase().includes(searchLower)
-    );
-  }
+    const where: any = { userId };
 
-  // Filter by industry
-  if (industry && typeof industry === 'string') {
-    filtered = filtered.filter(c => c.industry === industry);
-  }
+    if (search && typeof search === 'string') {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { company: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ];
+    }
 
-  // Sort
-  if (sortBy && typeof sortBy === 'string') {
-    filtered.sort((a, b) => {
-      const aVal = a[sortBy as keyof typeof a];
-      const bVal = b[sortBy as keyof typeof b];
-      if (typeof aVal === 'number' && typeof bVal === 'number') {
-        return order === 'desc' ? bVal - aVal : aVal - bVal;
-      }
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        return order === 'desc' ? bVal.localeCompare(aVal) : aVal.localeCompare(bVal);
-      }
-      return 0;
+    if (industry && typeof industry === 'string') {
+      where.industry = industry;
+    }
+
+    const clients = await prisma.client.findMany({
+      where,
+      include: {
+        policies: true,
+        activities: { orderBy: { occurredAt: 'desc' }, take: 1 },
+      },
+      orderBy: sortBy === 'name'
+        ? { name: order === 'desc' ? 'desc' : 'asc' }
+        : sortBy === 'company'
+        ? { company: order === 'desc' ? 'desc' : 'asc' }
+        : { createdAt: 'desc' },
     });
-  }
 
-  res.json({
-    clients: filtered,
-    total: filtered.length,
-  });
+    const transformed = clients.map(c => ({
+      id: c.id,
+      name: c.name,
+      company: c.company,
+      email: c.email || '',
+      phone: c.phone || '',
+      industry: c.industry || 'Other',
+      totalPremium: c.policies.reduce((sum, p) => sum + Number(p.premium), 0),
+      policyCount: c.policies.length,
+      riskScore: 'MEDIUM',
+      lastContact: c.activities[0]?.occurredAt?.toISOString() || c.updatedAt.toISOString(),
+      createdAt: c.createdAt.toISOString(),
+    }));
+
+    res.json({
+      clients: transformed,
+      total: transformed.length,
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 // GET /api/clients/:id
-router.get('/:id', authenticate, (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  const client = mockClients.find(c => c.id === req.params.id);
+router.get('/:id', authenticate, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      next(createError('Unauthorized', 401));
+      return;
+    }
 
-  if (!client) {
-    next(createError('Client not found', 404));
-    return;
+    const client = await prisma.client.findFirst({
+      where: { id: req.params.id, userId },
+      include: {
+        policies: true,
+        activities: { orderBy: { occurredAt: 'desc' }, take: 1 },
+      },
+    });
+
+    if (!client) {
+      next(createError('Client not found', 404));
+      return;
+    }
+
+    res.json({
+      id: client.id,
+      name: client.name,
+      company: client.company,
+      email: client.email || '',
+      phone: client.phone || '',
+      industry: client.industry || 'Other',
+      address: client.address,
+      totalPremium: client.policies.reduce((sum, p) => sum + Number(p.premium), 0),
+      policyCount: client.policies.length,
+      riskScore: 'MEDIUM',
+      lastContact: client.activities[0]?.occurredAt?.toISOString() || client.updatedAt.toISOString(),
+      createdAt: client.createdAt.toISOString(),
+    });
+  } catch (error) {
+    next(error);
   }
-
-  res.json(client);
 });
 
 // GET /api/clients/:id/policies
-router.get('/:id/policies', authenticate, (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  const client = mockClients.find(c => c.id === req.params.id);
+router.get('/:id/policies', authenticate, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      next(createError('Unauthorized', 401));
+      return;
+    }
 
-  if (!client) {
-    next(createError('Client not found', 404));
-    return;
+    const client = await prisma.client.findFirst({
+      where: { id: req.params.id, userId },
+    });
+
+    if (!client) {
+      next(createError('Client not found', 404));
+      return;
+    }
+
+    const policies = await prisma.policy.findMany({
+      where: { clientId: client.id },
+    });
+
+    const transformed = policies.map(p => ({
+      id: p.id,
+      type: p.type,
+      carrier: p.carrier,
+      policyNumber: p.policyNumber,
+      premium: Number(p.premium),
+      coverageLimit: Number(p.coverageLimit),
+      deductible: Number(p.deductible || 0),
+      status: p.status,
+      effectiveDate: p.effectiveDate.toISOString(),
+      expirationDate: p.expirationDate.toISOString(),
+    }));
+
+    res.json({ policies: transformed });
+  } catch (error) {
+    next(error);
   }
+});
 
-  // Mock policies for this client
-  const policies = [
-    {
-      id: 'p1',
-      type: 'General Liability',
-      carrier: 'Hartford',
-      premium: 45000,
-      status: 'active',
-      expirationDate: '2024-02-15',
-    },
-    {
-      id: 'p2',
-      type: 'Property',
-      carrier: 'Travelers',
-      premium: 32000,
-      status: 'active',
-      expirationDate: '2024-06-30',
-    },
-  ];
+// POST /api/clients - Create new client
+router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      next(createError('Unauthorized', 401));
+      return;
+    }
 
-  res.json({ policies });
+    const { name, company, email, phone, industry, address } = req.body;
+
+    if (!name || !company) {
+      next(createError('Name and company are required', 400));
+      return;
+    }
+
+    const client = await prisma.client.create({
+      data: {
+        userId,
+        name,
+        company,
+        email: email || null,
+        phone: phone || null,
+        industry: industry || null,
+        address: address || null,
+      },
+    });
+
+    res.status(201).json({
+      id: client.id,
+      name: client.name,
+      company: client.company,
+      email: client.email || '',
+      phone: client.phone || '',
+      industry: client.industry || 'Other',
+      totalPremium: 0,
+      policyCount: 0,
+      riskScore: 'MEDIUM',
+      lastContact: client.createdAt.toISOString(),
+      createdAt: client.createdAt.toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/clients/:id - Update client
+router.put('/:id', authenticate, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      next(createError('Unauthorized', 401));
+      return;
+    }
+
+    const existing = await prisma.client.findFirst({
+      where: { id: req.params.id, userId },
+    });
+
+    if (!existing) {
+      next(createError('Client not found', 404));
+      return;
+    }
+
+    const { name, company, email, phone, industry, address } = req.body;
+
+    const client = await prisma.client.update({
+      where: { id: req.params.id },
+      data: {
+        name: name ?? existing.name,
+        company: company ?? existing.company,
+        email: email !== undefined ? email : existing.email,
+        phone: phone !== undefined ? phone : existing.phone,
+        industry: industry !== undefined ? industry : existing.industry,
+        address: address !== undefined ? address : existing.address,
+      },
+      include: { policies: true },
+    });
+
+    res.json({
+      id: client.id,
+      name: client.name,
+      company: client.company,
+      email: client.email || '',
+      phone: client.phone || '',
+      industry: client.industry || 'Other',
+      totalPremium: client.policies.reduce((sum, p) => sum + Number(p.premium), 0),
+      policyCount: client.policies.length,
+      riskScore: 'MEDIUM',
+      lastContact: client.updatedAt.toISOString(),
+      createdAt: client.createdAt.toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// DELETE /api/clients/:id - Delete client
+router.delete('/:id', authenticate, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      next(createError('Unauthorized', 401));
+      return;
+    }
+
+    const existing = await prisma.client.findFirst({
+      where: { id: req.params.id, userId },
+    });
+
+    if (!existing) {
+      next(createError('Client not found', 404));
+      return;
+    }
+
+    await prisma.client.delete({
+      where: { id: req.params.id },
+    });
+
+    res.json({ success: true, message: 'Client deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
 });
 
 export default router;

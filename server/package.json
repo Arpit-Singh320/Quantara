@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Quantara Backend API Server",
   "main": "dist/index.js",
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -13,6 +16,7 @@
     "db:push": "prisma db push"
   },
   "dependencies": {
+    "@getbrevo/brevo": "^3.0.1",
     "@google/generative-ai": "^0.21.0",
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
