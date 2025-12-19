@@ -1004,9 +1004,21 @@ router.get('/microsoft/callback', async (req, res, next) => {
     });
 
     if (!tokenResponse.ok) {
-      const error = await tokenResponse.text();
-      console.error('[Microsoft Callback] Token exchange failed:', error);
-      res.redirect(`${config.corsOrigin}/integrations?error=token_exchange_failed`);
+      const errorText = await tokenResponse.text();
+      console.error('[Microsoft Callback] Token exchange failed. Status:', tokenResponse.status);
+      console.error('[Microsoft Callback] Error response:', errorText);
+      console.error('[Microsoft Callback] Redirect URI used:', redirectUri);
+      console.error('[Microsoft Callback] Tenant ID:', config.microsoftTenantId || 'common');
+
+      // Try to parse the error for more details
+      try {
+        const errorJson = JSON.parse(errorText);
+        console.error('[Microsoft Callback] Error code:', errorJson.error);
+        console.error('[Microsoft Callback] Error description:', errorJson.error_description);
+        res.redirect(`${config.corsOrigin}/integrations?error=${encodeURIComponent(errorJson.error || 'token_exchange_failed')}&error_description=${encodeURIComponent(errorJson.error_description || '')}`);
+      } catch {
+        res.redirect(`${config.corsOrigin}/integrations?error=token_exchange_failed`);
+      }
       return;
     }
 
@@ -1065,8 +1077,8 @@ router.get('/microsoft/callback', async (req, res, next) => {
 
     console.log(`[Microsoft OAuth] Token stored successfully. TokenStore has key: ${tokenStore.has(tokenKey)}`);
 
-    // Redirect to integrations page with success
-    res.redirect(`${config.corsOrigin}/integrations?connected=microsoft`);
+    // Redirect to calendar page with success (like Google does)
+    res.redirect(`${config.corsOrigin}/calendar?connected=microsoft`);
   } catch (error) {
     console.error('[Microsoft Callback] OAuth callback error:', error);
     res.redirect(`${config.corsOrigin}/integrations?error=callback_failed`);

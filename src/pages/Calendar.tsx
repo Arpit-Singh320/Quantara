@@ -170,15 +170,23 @@ export default function Calendar() {
   const [isGoogleConnected, setIsGoogleConnected] = useState(false);
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
   const [googleEvents, setGoogleEvents] = useState<CalendarEvent[]>([]);
+  const [isMicrosoftConnected, setIsMicrosoftConnected] = useState(false);
+  const [isConnectingMicrosoft, setIsConnectingMicrosoft] = useState(false);
+  const [microsoftEvents, setMicrosoftEvents] = useState<CalendarEvent[]>([]);
 
   const { clients } = useClients();
 
-  // Check if redirected from Google OAuth
+  // Check if redirected from OAuth
   useEffect(() => {
-    if (searchParams.get('connected') === 'google') {
+    const connected = searchParams.get('connected');
+    if (connected === 'google') {
       setIsGoogleConnected(true);
       toast.success('Google Calendar connected successfully!');
       fetchGoogleCalendarEvents();
+    } else if (connected === 'microsoft') {
+      setIsMicrosoftConnected(true);
+      toast.success('Microsoft Calendar connected successfully!');
+      fetchMicrosoftCalendarEvents();
     }
   }, [searchParams]);
 
@@ -197,6 +205,74 @@ export default function Calendar() {
       toast.error('Failed to connect to Google Calendar');
     } finally {
       setIsConnectingGoogle(false);
+    }
+  };
+
+  // Connect to Microsoft Calendar
+  const connectMicrosoftCalendar = async () => {
+    try {
+      setIsConnectingMicrosoft(true);
+      const response = await api.getConnectorAuthUrl('microsoft');
+      if (response.data?.authUrl) {
+        window.location.href = response.data.authUrl;
+      } else {
+        toast.error('Failed to get Microsoft auth URL');
+      }
+    } catch (error) {
+      toast.error('Failed to connect to Microsoft Calendar');
+    } finally {
+      setIsConnectingMicrosoft(false);
+    }
+  };
+
+  // Fetch Microsoft Calendar events
+  const fetchMicrosoftCalendarEvents = async () => {
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL ||
+        (import.meta.env.PROD ? 'https://backend-production-ceb3.up.railway.app' : 'http://localhost:3001');
+      const token = localStorage.getItem('auth_token');
+
+      const response = await fetch(
+        `${apiUrl}/api/connectors/microsoft/calendar/events`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        const transformedEvents: CalendarEvent[] = data.events.map((e: any) => {
+          const startDate = new Date(e.start);
+          const endDate = e.end ? new Date(e.end) : new Date(startDate.getTime() + 60 * 60 * 1000);
+          const durationMinutes = Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60));
+
+          return {
+            id: `microsoft-${e.id}`,
+            title: e.title,
+            client: e.organizer || '',
+            type: 'meeting' as const,
+            date: startDate.toISOString().split('T')[0],
+            time: startDate.toTimeString().slice(0, 5),
+            duration: durationMinutes,
+            location: e.location || (e.meetingUrl ? 'Microsoft Teams' : ''),
+            description: '',
+            source: 'microsoft' as 'local' | 'google',
+            htmlLink: e.deepLink,
+            meetLink: e.meetingUrl,
+            attendees: e.attendees?.map((a: string) => ({ email: '', displayName: a })),
+          };
+        });
+        setMicrosoftEvents(transformedEvents);
+        setIsMicrosoftConnected(true);
+      } else if (response.status === 401) {
+        setIsMicrosoftConnected(false);
+        setMicrosoftEvents([]);
+      }
+    } catch (error) {
+      console.error('Failed to fetch Microsoft Calendar events:', error);
     }
   };
 
@@ -259,20 +335,24 @@ export default function Calendar() {
     }
   };
 
-  // Check Google connection status on mount
+  // Check calendar connection status on mount
   useEffect(() => {
-    const checkGoogleConnection = async () => {
+    const checkCalendarConnections = async () => {
       try {
         const response = await api.getConnectors();
         if (response.data?.connectors?.google?.connected) {
           setIsGoogleConnected(true);
           fetchGoogleCalendarEvents();
         }
+        if (response.data?.connectors?.microsoft?.connected) {
+          setIsMicrosoftConnected(true);
+          fetchMicrosoftCalendarEvents();
+        }
       } catch (error) {
         // Ignore - not connected
       }
     };
-    checkGoogleConnection();
+    checkCalendarConnections();
   }, []);
 
   // Fetch events from API on mount
@@ -413,10 +493,23 @@ export default function Calendar() {
     const dateStr = formatDate(date);
     const localEvents = events.filter(event => event.date === dateStr);
     const gEvents = googleEvents.filter(event => event.date === dateStr);
-    return [...localEvents, ...gEvents];
+    const msEvents = microsoftEvents.filter(event => event.date === dateStr);
+    return [...localEvents, ...gEvents, ...msEvents];
   };
 
-  const allEvents = [...events, ...googleEvents];
+  const allEvents = [...events, ...googleEvents, ...microsoftEvents];
+
+  const getEventSourceColor = (event: CalendarEvent) => {
+    if (event.id.startsWith('google-')) return 'bg-blue-500';
+    if (event.id.startsWith('microsoft-')) return 'bg-purple-500';
+    return getEventTypeColor(event.type);
+  };
+
+  const getEventSourceBadge = (event: CalendarEvent) => {
+    if (event.id.startsWith('google-')) return { label: 'G', color: 'bg-blue-500' };
+    if (event.id.startsWith('microsoft-')) return { label: 'M', color: 'bg-purple-500' };
+    return null;
+  };
 
   const todaysEvents = allEvents.filter(event => {
     const eventDate = new Date(event.date);
@@ -457,6 +550,7 @@ export default function Calendar() {
             <Plus className="h-4 w-4" />
             <span className="hidden sm:inline">New Event</span>
           </Button>
+          {/* Google Calendar Connection */}
           {!isGoogleConnected ? (
             <Button
               variant="outline"
@@ -469,12 +563,33 @@ export default function Calendar() {
               ) : (
                 <Link2 className="h-4 w-4" />
               )}
-              <span className="hidden sm:inline">Connect Google</span>
+              <span className="hidden sm:inline">Google</span>
             </Button>
           ) : (
-            <Badge variant="outline" className="gap-1 py-1.5 px-3 text-green-600 border-green-600">
+            <Badge variant="outline" className="gap-1 py-1.5 px-3 text-blue-600 border-blue-600">
               <Link2 className="h-3 w-3" />
-              Google Connected
+              <span className="hidden sm:inline">Google</span>
+            </Badge>
+          )}
+          {/* Microsoft Calendar Connection */}
+          {!isMicrosoftConnected ? (
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={connectMicrosoftCalendar}
+              disabled={isConnectingMicrosoft}
+            >
+              {isConnectingMicrosoft ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Link2 className="h-4 w-4" />
+              )}
+              <span className="hidden sm:inline">Microsoft</span>
+            </Button>
+          ) : (
+            <Badge variant="outline" className="gap-1 py-1.5 px-3 text-purple-600 border-purple-600">
+              <Link2 className="h-3 w-3" />
+              <span className="hidden sm:inline">Microsoft</span>
             </Badge>
           )}
         </div>
@@ -510,12 +625,14 @@ export default function Calendar() {
                             <button
                               key={event.id}
                               onClick={() => setSelectedEvent(event)}
-                              className={`w-full text-left p-2 rounded mb-1 text-xs ${event.source === 'google' ? 'bg-blue-500' : getEventTypeColor(event.type)} text-white hover:opacity-90 transition-opacity`}
+                              className={`w-full text-left p-2 rounded mb-1 text-xs ${getEventSourceColor(event)} text-white hover:opacity-90 transition-opacity`}
                             >
                               <div className="flex items-center gap-1">
                                 <p className="font-medium truncate flex-1">{event.title}</p>
-                                {event.source === 'google' && (
-                                  <span className="text-[8px] bg-white/20 px-1 rounded">G</span>
+                                {getEventSourceBadge(event) && (
+                                  <span className={`text-[8px] ${getEventSourceBadge(event)?.color} bg-white/20 px-1 rounded`}>
+                                    {getEventSourceBadge(event)?.label}
+                                  </span>
                                 )}
                               </div>
                               {event.time !== '00:00' && (
