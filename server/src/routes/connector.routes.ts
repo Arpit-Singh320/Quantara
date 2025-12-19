@@ -4,6 +4,7 @@
 
 import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import crypto from 'crypto';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.middleware.js';
 import { createError } from '../middleware/error.middleware.js';
 import { config } from '../config/index.js';
@@ -26,6 +27,19 @@ const tokenStore: Map<string, TokenData> = new Map();
 
 // In-memory connection store (replace with database in production)
 const connections: Map<string, { userId: string; type: ConnectorType; connected: boolean; lastSync?: string }> = new Map();
+
+// PKCE code verifier store (keyed by state/userId)
+const pkceStore: Map<string, string> = new Map();
+
+// Generate PKCE code verifier (43-128 characters)
+function generateCodeVerifier(): string {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
+// Generate PKCE code challenge from verifier (SHA-256 + base64url)
+function generateCodeChallenge(verifier: string): string {
+  return crypto.createHash('sha256').update(verifier).digest('base64url');
+}
 
 // Validation schemas
 const connectSchema = z.object({
@@ -88,7 +102,16 @@ router.get('/:type/auth-url', authenticate, (req: AuthenticatedRequest, res: Res
       }
       // Include user ID in state parameter so callback can associate tokens with the user
       const sfUserId = req.user?.id || '';
-      authUrl = `https://login.salesforce.com/services/oauth2/authorize?response_type=code&client_id=${config.salesforceClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=api%20refresh_token&state=${encodeURIComponent(sfUserId)}`;
+
+      // Generate PKCE code verifier and challenge (required by Salesforce)
+      const codeVerifier = generateCodeVerifier();
+      const codeChallenge = generateCodeChallenge(codeVerifier);
+
+      // Store code verifier for later use in token exchange (keyed by user ID)
+      pkceStore.set(sfUserId, codeVerifier);
+      console.log(`[Salesforce Auth] Generated PKCE for user ${sfUserId}, challenge: ${codeChallenge.substring(0, 10)}...`);
+
+      authUrl = `https://login.salesforce.com/services/oauth2/authorize?response_type=code&client_id=${config.salesforceClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=api%20refresh_token&state=${encodeURIComponent(sfUserId)}&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256`;
       break;
 
     case 'microsoft':
@@ -538,8 +561,19 @@ router.get('/salesforce/callback', async (req, res, next) => {
     }
 
     const redirectUri = `${config.apiUrl}/api/connectors/salesforce/callback`;
+    const callbackUserId = (state as string) || '';
 
-    // Exchange code for tokens
+    // Retrieve PKCE code verifier
+    const codeVerifier = pkceStore.get(callbackUserId);
+    console.log(`[Salesforce Callback] Retrieved code_verifier for user ${callbackUserId}: ${codeVerifier ? 'present' : 'missing'}`);
+
+    if (!codeVerifier) {
+      console.error('[Salesforce Callback] No PKCE code verifier found for user');
+      res.redirect(`${config.corsOrigin}/integrations?error=pkce_verifier_missing`);
+      return;
+    }
+
+    // Exchange code for tokens (with PKCE code_verifier)
     const tokenResponse = await fetch('https://login.salesforce.com/services/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -549,8 +583,12 @@ router.get('/salesforce/callback', async (req, res, next) => {
         client_secret: config.salesforceClientSecret || '',
         redirect_uri: redirectUri,
         grant_type: 'authorization_code',
+        code_verifier: codeVerifier,
       }),
     });
+
+    // Clean up PKCE store
+    pkceStore.delete(callbackUserId);
 
     if (!tokenResponse.ok) {
       const error = await tokenResponse.text();
@@ -568,15 +606,7 @@ router.get('/salesforce/callback', async (req, res, next) => {
       id: string;
     };
 
-    // Store tokens (using state as userId)
-    const callbackUserId = (state as string) || '';
-
-    if (!callbackUserId) {
-      console.error('Salesforce OAuth callback: No user ID in state parameter');
-      res.redirect(`${config.corsOrigin}/integrations?error=no_user_state`);
-      return;
-    }
-
+    // callbackUserId already declared above for PKCE
     const tokenKey = `${callbackUserId}-salesforce`;
 
     console.log(`[Salesforce OAuth] Storing tokens for user: ${callbackUserId}, key: ${tokenKey}`);
