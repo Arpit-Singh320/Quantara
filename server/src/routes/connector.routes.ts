@@ -1250,8 +1250,10 @@ router.get('/microsoft/calendar/events', authenticate, async (req: Authenticated
     if (!response.ok) {
       const errorText = await response.text();
       console.error('[Microsoft Calendar] Failed to fetch events. Status:', response.status);
-      console.error('[Microsoft Calendar] Error body:', errorText);
+      console.error('[Microsoft Calendar] Error body:', errorText || '(empty)');
       console.error('[Microsoft Calendar] Token prefix:', tokens.accessToken.substring(0, 50) + '...');
+      console.error('[Microsoft Calendar] WWW-Authenticate:', response.headers.get('www-authenticate') || '(none)');
+      console.error('[Microsoft Calendar] Response headers:', JSON.stringify(Object.fromEntries(response.headers.entries())));
 
       // Try to parse error for more details
       try {
@@ -1259,7 +1261,10 @@ router.get('/microsoft/calendar/events', authenticate, async (req: Authenticated
         console.error('[Microsoft Calendar] Error code:', errorJson.error?.code);
         console.error('[Microsoft Calendar] Error message:', errorJson.error?.message);
       } catch (e) {
-        // Not JSON
+        // Not JSON - maybe check if it's HTML error page
+        if (errorText.includes('<!DOCTYPE') || errorText.includes('<html')) {
+          console.error('[Microsoft Calendar] Received HTML error page');
+        }
       }
 
       // Only revoke on actual 401, not on other errors
