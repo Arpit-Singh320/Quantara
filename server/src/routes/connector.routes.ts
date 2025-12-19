@@ -211,9 +211,10 @@ router.get('/:type/auth-url', authenticate, (req: AuthenticatedRequest, res: Res
       // Include user ID in state parameter so callback can associate tokens with the user
       const msUserId = req.user?.id || '';
       console.log(`[Microsoft Auth] Generating auth URL for user ${msUserId}`);
-      // Always use 'common' endpoint to support both personal and organizational accounts
-      // Using tenant-specific endpoint causes 401 for guest/external users without Exchange mailbox
-      authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?response_type=code&client_id=${config.microsoftClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20profile%20email%20Mail.Read%20Mail.Send%20Calendars.Read%20Calendars.ReadWrite%20User.Read%20offline_access&state=${encodeURIComponent(msUserId)}&prompt=consent`;
+      // Use tenant-specific endpoint (app is configured for single tenant)
+      // Note: Users must have Exchange mailbox in this tenant for calendar access
+      const tenantId = config.microsoftTenantId || 'common';
+      authUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize?response_type=code&client_id=${config.microsoftClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20profile%20email%20Mail.Read%20Mail.Send%20Calendars.Read%20Calendars.ReadWrite%20User.Read%20offline_access&state=${encodeURIComponent(msUserId)}&prompt=consent`;
       break;
 
     case 'google':
@@ -1060,8 +1061,9 @@ router.get('/microsoft/callback', async (req, res, next) => {
       return;
     }
 
-    // Exchange code for tokens - always use 'common' endpoint
-    const tokenResponse = await fetch(`https://login.microsoftonline.com/common/oauth2/v2.0/token`, {
+    // Exchange code for tokens - use tenant-specific endpoint
+    const tenantId = config.microsoftTenantId || 'common';
+    const tokenResponse = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
