@@ -119,7 +119,10 @@ router.get('/:type/auth-url', authenticate, (req: AuthenticatedRequest, res: Res
         next(createError('Microsoft not configured', 500));
         return;
       }
-      authUrl = `https://login.microsoftonline.com/${config.microsoftTenantId || 'common'}/oauth2/v2.0/authorize?response_type=code&client_id=${config.microsoftClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20profile%20email%20Mail.Read%20Calendars.Read%20offline_access`;
+      // Include user ID in state parameter so callback can associate tokens with the user
+      const msUserId = req.user?.id || '';
+      console.log(`[Microsoft Auth] Generating auth URL for user ${msUserId}`);
+      authUrl = `https://login.microsoftonline.com/${config.microsoftTenantId || 'common'}/oauth2/v2.0/authorize?response_type=code&client_id=${config.microsoftClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20profile%20email%20Mail.Read%20Mail.Send%20Calendars.Read%20Calendars.ReadWrite%20User.Read%20offline_access&state=${encodeURIComponent(msUserId)}&prompt=consent`;
       break;
 
     case 'google':
@@ -939,6 +942,336 @@ router.get('/salesforce/activities', authenticate, async (req: AuthenticatedRequ
 // Helper function to get Salesforce tokens
 export function getSalesforceTokens(userId: string): SalesforceTokenData | undefined {
   return salesforceTokenStore.get(`${userId}-salesforce`);
+}
+
+// =====================================================
+// MICROSOFT 365 INTEGRATION
+// =====================================================
+
+// Microsoft token store
+interface MicrosoftTokenData extends TokenData {
+  idToken?: string;
+  userEmail?: string;
+}
+const microsoftTokenStore: Map<string, MicrosoftTokenData> = new Map();
+
+// GET /api/connectors/microsoft/callback - OAuth callback for Microsoft
+router.get('/microsoft/callback', async (req, res, next) => {
+  try {
+    const { code, state, error, error_description } = req.query;
+
+    console.log('[Microsoft Callback] Query params:', {
+      code: code ? 'present' : 'missing',
+      state,
+      error,
+      error_description
+    });
+
+    // Check for Microsoft errors first
+    if (error) {
+      console.error('[Microsoft Callback] OAuth error from Microsoft:', error, error_description);
+      res.redirect(`${config.corsOrigin}/integrations?error=${encodeURIComponent(error as string)}&error_description=${encodeURIComponent((error_description as string) || '')}`);
+      return;
+    }
+
+    if (!code) {
+      console.error('[Microsoft Callback] No code received');
+      res.redirect(`${config.corsOrigin}/integrations?error=no_code`);
+      return;
+    }
+
+    const redirectUri = `${config.apiUrl}/api/connectors/microsoft/callback`;
+    const callbackUserId = (state as string) || '';
+
+    if (!callbackUserId) {
+      console.error('[Microsoft Callback] No user ID in state parameter');
+      res.redirect(`${config.corsOrigin}/integrations?error=no_user_state`);
+      return;
+    }
+
+    // Exchange code for tokens
+    const tokenResponse = await fetch(`https://login.microsoftonline.com/${config.microsoftTenantId || 'common'}/oauth2/v2.0/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code: code as string,
+        client_id: config.microsoftClientId || '',
+        client_secret: config.microsoftClientSecret || '',
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+        scope: 'openid profile email Mail.Read Mail.Send Calendars.Read Calendars.ReadWrite User.Read offline_access',
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const error = await tokenResponse.text();
+      console.error('[Microsoft Callback] Token exchange failed:', error);
+      res.redirect(`${config.corsOrigin}/integrations?error=token_exchange_failed`);
+      return;
+    }
+
+    const tokens = await tokenResponse.json() as {
+      access_token: string;
+      refresh_token?: string;
+      id_token?: string;
+      expires_in: number;
+      token_type: string;
+      scope: string;
+    };
+
+    const tokenKey = `${callbackUserId}-microsoft`;
+
+    console.log(`[Microsoft OAuth] Storing tokens for user: ${callbackUserId}, key: ${tokenKey}`);
+
+    // Get user info to store email
+    let userEmail = '';
+    try {
+      const userResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      });
+      if (userResponse.ok) {
+        const userData = await userResponse.json() as { mail?: string; userPrincipalName?: string };
+        userEmail = userData.mail || userData.userPrincipalName || '';
+        console.log(`[Microsoft OAuth] User email: ${userEmail}`);
+      }
+    } catch (e) {
+      console.error('[Microsoft OAuth] Failed to fetch user info:', e);
+    }
+
+    // Store in both token stores
+    tokenStore.set(tokenKey, {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt: new Date(Date.now() + tokens.expires_in * 1000),
+      scope: tokens.scope,
+    });
+
+    microsoftTokenStore.set(tokenKey, {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt: new Date(Date.now() + tokens.expires_in * 1000),
+      scope: tokens.scope,
+      idToken: tokens.id_token,
+      userEmail,
+    });
+
+    // Mark as connected
+    connections.set(tokenKey, {
+      userId: callbackUserId,
+      type: 'microsoft',
+      connected: true,
+      lastSync: new Date().toISOString(),
+    });
+
+    console.log(`[Microsoft OAuth] Token stored successfully. TokenStore has key: ${tokenStore.has(tokenKey)}`);
+
+    // Redirect to integrations page with success
+    res.redirect(`${config.corsOrigin}/integrations?connected=microsoft`);
+  } catch (error) {
+    console.error('[Microsoft Callback] OAuth callback error:', error);
+    res.redirect(`${config.corsOrigin}/integrations?error=callback_failed`);
+  }
+});
+
+// GET /api/connectors/microsoft/emails - Fetch recent emails from Outlook
+router.get('/microsoft/emails', authenticate, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      next(createError('Unauthorized', 401));
+      return;
+    }
+
+    const tokenKey = `${userId}-microsoft`;
+    const tokens = microsoftTokenStore.get(tokenKey);
+
+    console.log(`[Microsoft Mail] Fetching emails for user: ${userId}`);
+
+    if (!tokens) {
+      next(createError('Microsoft not connected. Please connect your Microsoft account first.', 401));
+      return;
+    }
+
+    // Fetch recent emails from Microsoft Graph
+    const response = await fetch('https://graph.microsoft.com/v1.0/me/messages?$top=20&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,isRead,hasAttachments', {
+      headers: {
+        Authorization: `Bearer ${tokens.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('[Microsoft Mail] Failed to fetch emails:', error);
+
+      if (response.status === 401) {
+        // Token expired, clear it
+        tokenStore.delete(tokenKey);
+        microsoftTokenStore.delete(tokenKey);
+        connections.delete(tokenKey);
+        next(createError('Microsoft session expired. Please reconnect.', 401));
+        return;
+      }
+
+      next(createError('Failed to fetch emails', 500));
+      return;
+    }
+
+    const data = await response.json() as { value: any[] };
+
+    const emails = data.value.map((email: any) => ({
+      id: email.id,
+      subject: email.subject,
+      from: email.from?.emailAddress?.address || 'Unknown',
+      fromName: email.from?.emailAddress?.name || 'Unknown',
+      receivedAt: email.receivedDateTime,
+      preview: email.bodyPreview,
+      isRead: email.isRead,
+      hasAttachments: email.hasAttachments,
+      source: 'microsoft',
+      deepLink: `https://outlook.office.com/mail/inbox/id/${email.id}`,
+    }));
+
+    res.json({
+      emails,
+      count: emails.length,
+      source: 'Microsoft 365',
+      sourceSystem: 'Outlook',
+      recordType: 'Email',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/connectors/microsoft/calendar/events - Fetch calendar events
+router.get('/microsoft/calendar/events', authenticate, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      next(createError('Unauthorized', 401));
+      return;
+    }
+
+    const tokenKey = `${userId}-microsoft`;
+    const tokens = microsoftTokenStore.get(tokenKey);
+
+    console.log(`[Microsoft Calendar] Fetching events for user: ${userId}`);
+
+    if (!tokens) {
+      next(createError('Microsoft not connected. Please connect your Microsoft account first.', 401));
+      return;
+    }
+
+    // Get events for next 30 days
+    const now = new Date();
+    const futureDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const response = await fetch(`https://graph.microsoft.com/v1.0/me/calendarview?startDateTime=${now.toISOString()}&endDateTime=${futureDate.toISOString()}&$top=50&$orderby=start/dateTime&$select=id,subject,start,end,location,organizer,attendees,isOnlineMeeting,onlineMeetingUrl`, {
+      headers: {
+        Authorization: `Bearer ${tokens.accessToken}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'outlook.timezone="UTC"',
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('[Microsoft Calendar] Failed to fetch events:', error);
+
+      if (response.status === 401) {
+        tokenStore.delete(tokenKey);
+        microsoftTokenStore.delete(tokenKey);
+        connections.delete(tokenKey);
+        next(createError('Microsoft session expired. Please reconnect.', 401));
+        return;
+      }
+
+      next(createError('Failed to fetch calendar events', 500));
+      return;
+    }
+
+    const data = await response.json() as { value: any[] };
+
+    const events = data.value.map((event: any) => ({
+      id: event.id,
+      title: event.subject,
+      start: event.start?.dateTime,
+      end: event.end?.dateTime,
+      location: event.location?.displayName,
+      organizer: event.organizer?.emailAddress?.name,
+      attendees: event.attendees?.map((a: any) => a.emailAddress?.name).filter(Boolean),
+      isOnlineMeeting: event.isOnlineMeeting,
+      meetingUrl: event.onlineMeetingUrl,
+      source: 'microsoft',
+      deepLink: `https://outlook.office.com/calendar/item/${event.id}`,
+    }));
+
+    res.json({
+      events,
+      count: events.length,
+      source: 'Microsoft 365',
+      sourceSystem: 'Outlook Calendar',
+      recordType: 'CalendarEvent',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/connectors/microsoft/me - Get current user info
+router.get('/microsoft/me', authenticate, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      next(createError('Unauthorized', 401));
+      return;
+    }
+
+    const tokenKey = `${userId}-microsoft`;
+    const tokens = microsoftTokenStore.get(tokenKey);
+
+    if (!tokens) {
+      next(createError('Microsoft not connected', 401));
+      return;
+    }
+
+    const response = await fetch('https://graph.microsoft.com/v1.0/me', {
+      headers: {
+        Authorization: `Bearer ${tokens.accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      next(createError('Failed to fetch user info', 500));
+      return;
+    }
+
+    const userData = await response.json() as {
+      id: string;
+      displayName: string;
+      mail: string;
+      userPrincipalName: string;
+      jobTitle?: string;
+    };
+
+    res.json({
+      user: {
+        id: userData.id,
+        name: userData.displayName,
+        email: userData.mail || userData.userPrincipalName,
+        jobTitle: userData.jobTitle,
+      },
+      source: 'Microsoft 365',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Helper function to get Microsoft tokens
+export function getMicrosoftTokens(userId: string): MicrosoftTokenData | undefined {
+  return microsoftTokenStore.get(`${userId}-microsoft`);
 }
 
 export default router;

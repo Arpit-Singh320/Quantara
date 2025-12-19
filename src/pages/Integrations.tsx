@@ -160,6 +160,49 @@ export default function Integrations() {
     }
   };
 
+  // Function to test Microsoft data fetch
+  const testMicrosoftData = async () => {
+    console.log('[Integrations] Testing Microsoft data fetch...');
+    const token = localStorage.getItem('auth_token');
+    console.log('[Integrations] JWT Token present:', !!token, token ? `(${token.substring(0, 20)}...)` : '(null)');
+
+    if (!token) {
+      toast.error('Not logged in - please log in first');
+      return;
+    }
+
+    const headers = {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    };
+
+    try {
+      // Test emails endpoint
+      const emailsRes = await fetch(`${import.meta.env.VITE_API_URL || 'https://backend-production-ceb3.up.railway.app'}/api/connectors/microsoft/emails`, { headers });
+      const emails = await emailsRes.json();
+      console.log('[Microsoft] Emails:', emails);
+
+      // Test calendar endpoint
+      const calendarRes = await fetch(`${import.meta.env.VITE_API_URL || 'https://backend-production-ceb3.up.railway.app'}/api/connectors/microsoft/calendar/events`, { headers });
+      const calendar = await calendarRes.json();
+      console.log('[Microsoft] Calendar Events:', calendar);
+
+      // Test user info endpoint
+      const meRes = await fetch(`${import.meta.env.VITE_API_URL || 'https://backend-production-ceb3.up.railway.app'}/api/connectors/microsoft/me`, { headers });
+      const userInfo = await meRes.json();
+      console.log('[Microsoft] User Info:', userInfo);
+
+      if (emails.error || calendar.error) {
+        toast.error('Some Microsoft data failed to load - check console');
+      } else {
+        toast.success(`Microsoft data fetched! ${emails.count || 0} emails, ${calendar.count || 0} events. Check console.`);
+      }
+    } catch (error) {
+      console.error('[Microsoft] Error fetching data:', error);
+      toast.error('Failed to fetch Microsoft data');
+    }
+  };
+
   return (
     <div className="flex h-screen bg-background">
       {/* Sidebar */}
@@ -274,6 +317,15 @@ export default function Integrations() {
                               variant="secondary"
                               size="sm"
                               onClick={testSalesforceData}
+                            >
+                              Test Data
+                            </Button>
+                          )}
+                          {type === 'microsoft' && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={testMicrosoftData}
                             >
                               Test Data
                             </Button>
