@@ -211,7 +211,9 @@ router.get('/:type/auth-url', authenticate, (req: AuthenticatedRequest, res: Res
       // Include user ID in state parameter so callback can associate tokens with the user
       const msUserId = req.user?.id || '';
       console.log(`[Microsoft Auth] Generating auth URL for user ${msUserId}`);
-      authUrl = `https://login.microsoftonline.com/${config.microsoftTenantId || 'common'}/oauth2/v2.0/authorize?response_type=code&client_id=${config.microsoftClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20profile%20email%20Mail.Read%20Mail.Send%20Calendars.Read%20Calendars.ReadWrite%20User.Read%20offline_access&state=${encodeURIComponent(msUserId)}&prompt=consent`;
+      // Always use 'common' endpoint to support both personal and organizational accounts
+      // Using tenant-specific endpoint causes 401 for guest/external users without Exchange mailbox
+      authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?response_type=code&client_id=${config.microsoftClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20profile%20email%20Mail.Read%20Mail.Send%20Calendars.Read%20Calendars.ReadWrite%20User.Read%20offline_access&state=${encodeURIComponent(msUserId)}&prompt=consent`;
       break;
 
     case 'google':
@@ -1058,8 +1060,8 @@ router.get('/microsoft/callback', async (req, res, next) => {
       return;
     }
 
-    // Exchange code for tokens
-    const tokenResponse = await fetch(`https://login.microsoftonline.com/${config.microsoftTenantId || 'common'}/oauth2/v2.0/token`, {
+    // Exchange code for tokens - always use 'common' endpoint
+    const tokenResponse = await fetch(`https://login.microsoftonline.com/common/oauth2/v2.0/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -1282,8 +1284,16 @@ router.get('/microsoft/calendar/events', authenticate, async (req: Authenticated
         }
       }
 
-      // Only revoke on actual 401, not on other errors
+      // Don't immediately revoke on 401 - the issue might be no mailbox, not invalid token
+      // 401 with empty body often means the user doesn't have an Exchange mailbox
       if (response.status === 401) {
+        // Check if error body is empty - indicates no mailbox rather than expired token
+        if (!errorText || errorText.length === 0) {
+          console.error('[Microsoft Calendar] 401 with empty body - likely no Exchange mailbox for this account');
+          next(createError('Microsoft account connected but calendar access unavailable. Your account may not have an Exchange mailbox. Try connecting with a Microsoft 365 work account or Outlook.com account.', 403));
+          return;
+        }
+        // If there's an actual error message, token might be invalid
         await deleteTokenFromDb(userId, 'microsoft');
         next(createError('Microsoft session expired. Please reconnect.', 401));
         return;
