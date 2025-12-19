@@ -194,15 +194,17 @@ router.delete('/:type', authenticate, (req: AuthenticatedRequest, res: Response,
   }
 
   const connectionId = `${userId}-${type}`;
-  const connection = connections.get(connectionId);
 
-  if (!connection) {
-    next(createError('Connection not found', 404));
-    return;
+  // Delete from all stores (idempotent - don't error if not found)
+  connections.delete(connectionId);
+  tokenStore.delete(connectionId);
+
+  // Also delete from salesforce-specific store if applicable
+  if (type === 'salesforce') {
+    salesforceTokenStore.delete(connectionId);
   }
 
-  connections.delete(connectionId);
-
+  // Always return success - idempotent disconnect
   res.json({
     message: `${type} disconnected successfully`,
     connected: false,
