@@ -33,13 +33,36 @@ export default function Integrations() {
   const [connectingType, setConnectingType] = useState<string | null>(null);
 
   useEffect(() => {
+    // Check for OAuth callback parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const connected = urlParams.get('connected');
+    const error = urlParams.get('error');
+
+    console.log('[Integrations] URL params:', { connected, error });
+
+    if (connected) {
+      console.log(`[Integrations] OAuth callback success for: ${connected}`);
+      toast.success(`${connected.charAt(0).toUpperCase() + connected.slice(1)} connected successfully!`);
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    if (error) {
+      console.error(`[Integrations] OAuth callback error: ${error}`);
+      toast.error(`Connection failed: ${error}`);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     loadConnectors();
   }, []);
 
   const loadConnectors = async () => {
     setIsLoading(true);
+    console.log('[Integrations] Loading connectors...');
     const response = await api.getConnectors();
+    console.log('[Integrations] Connectors response:', response);
     if (response.data?.connectors) {
+      console.log('[Integrations] Connectors loaded:', response.data.connectors);
       setConnectors(response.data.connectors);
     }
     setIsLoading(false);
@@ -47,32 +70,29 @@ export default function Integrations() {
 
   const handleConnect = async (type: string) => {
     setConnectingType(type);
+    console.log(`[Integrations] Initiating OAuth for: ${type}`);
 
-    // Get auth URL
+    // Get auth URL from backend
     const urlResponse = await api.getConnectorAuthUrl(type as 'salesforce' | 'microsoft' | 'google' | 'hubspot');
+    console.log(`[Integrations] Auth URL response:`, urlResponse);
 
     if (urlResponse.data?.authUrl) {
-      // In production, this would open OAuth popup
-      // For now, simulate connection
-      const connectResponse = await api.connectConnector(type as 'salesforce' | 'microsoft' | 'google' | 'hubspot');
-
-      if (connectResponse.data?.connected) {
-        toast.success(`${connectors[type]?.name || type} connected successfully`);
-        await loadConnectors();
-      } else {
-        toast.error(connectResponse.error || 'Connection failed');
-      }
+      console.log(`[Integrations] Redirecting to OAuth URL: ${urlResponse.data.authUrl}`);
+      // Actually redirect to the OAuth URL
+      window.location.href = urlResponse.data.authUrl;
     } else {
+      console.error(`[Integrations] Failed to get auth URL:`, urlResponse.error);
       toast.error(urlResponse.error || 'Could not get authorization URL');
+      setConnectingType(null);
     }
-
-    setConnectingType(null);
   };
 
   const handleDisconnect = async (type: string) => {
     setConnectingType(type);
+    console.log(`[Integrations] Disconnecting: ${type}`);
 
     const response = await api.disconnectConnector(type as 'salesforce' | 'microsoft' | 'google' | 'hubspot');
+    console.log(`[Integrations] Disconnect response:`, response);
 
     if (response.data) {
       toast.success(`${connectors[type]?.name || type} disconnected`);
@@ -86,8 +106,10 @@ export default function Integrations() {
 
   const handleSync = async (type: string) => {
     setConnectingType(type);
+    console.log(`[Integrations] Syncing: ${type}`);
 
     const response = await api.syncConnector(type as 'salesforce' | 'microsoft' | 'google' | 'hubspot');
+    console.log(`[Integrations] Sync response:`, response);
 
     if (response.data) {
       toast.success(`${connectors[type]?.name || type} synced successfully`);
@@ -96,6 +118,41 @@ export default function Integrations() {
     }
 
     setConnectingType(null);
+  };
+
+  // Function to test Salesforce data fetch
+  const testSalesforceData = async () => {
+    console.log('[Integrations] Testing Salesforce data fetch...');
+    try {
+      const accountsRes = await fetch(`${import.meta.env.VITE_API_URL || 'https://backend-production-ceb3.up.railway.app'}/api/connectors/salesforce/accounts`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      const accounts = await accountsRes.json();
+      console.log('[Salesforce] Accounts:', accounts);
+
+      const oppsRes = await fetch(`${import.meta.env.VITE_API_URL || 'https://backend-production-ceb3.up.railway.app'}/api/connectors/salesforce/opportunities`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      const opportunities = await oppsRes.json();
+      console.log('[Salesforce] Opportunities:', opportunities);
+
+      const contactsRes = await fetch(`${import.meta.env.VITE_API_URL || 'https://backend-production-ceb3.up.railway.app'}/api/connectors/salesforce/contacts`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      const contacts = await contactsRes.json();
+      console.log('[Salesforce] Contacts:', contacts);
+
+      toast.success('Salesforce data fetched! Check console for details.');
+    } catch (error) {
+      console.error('[Salesforce] Error fetching data:', error);
+      toast.error('Failed to fetch Salesforce data');
+    }
   };
 
   return (
@@ -207,6 +264,15 @@ export default function Integrations() {
                     <div className="flex items-center gap-2">
                       {connector.connected ? (
                         <>
+                          {type === 'salesforce' && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={testSalesforceData}
+                            >
+                              Test Data
+                            </Button>
+                          )}
                           <Button
                             variant="outline"
                             size="sm"
