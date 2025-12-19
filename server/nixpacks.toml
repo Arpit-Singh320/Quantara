@@ -1,4 +1,6 @@
-# Force Node.js provider (not static site)
+# FORCE Node.js provider - DO NOT use static/Caddy
+providers = ["node"]
+
 [phases.setup]
 nixPkgs = ["nodejs_20", "openssl"]
 
@@ -6,12 +8,7 @@ nixPkgs = ["nodejs_20", "openssl"]
 cmds = ["npm ci"]
 
 [phases.build]
-cmds = ["npm run build"]
+cmds = ["npm run build", "npx prisma generate"]
 
 [start]
-cmd = "npx prisma generate && node dist/index.js"
-
-# Explicitly set as Node.js web server
-[variables]
-NODE_ENV = "production"
-PORT = "3001"
+cmd = "node dist/index.js"
