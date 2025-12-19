@@ -1249,12 +1249,9 @@ router.get('/microsoft/calendar/events', authenticate, async (req: Authenticated
       console.error(`[Microsoft Calendar] Failed to decode token:`, e);
     }
 
-    // Get events for next 30 days using /me/events (works for guest accounts)
-    const now = new Date();
-    const futureDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-
-    // Use /me/events instead of /me/calendarView (calendarView requires Exchange mailbox)
-    const calendarUrl = `https://graph.microsoft.com/v1.0/me/events?$filter=start/dateTime ge '${now.toISOString()}' and end/dateTime le '${futureDate.toISOString()}'&$top=50&$orderby=start/dateTime&$select=id,subject,start,end,location,organizer,attendees,isOnlineMeeting,onlineMeetingUrl`;
+    // Get calendar events - try simple /me/events first (no filter)
+    // The /me/calendarView endpoint requires Exchange mailbox, /me/events is simpler
+    const calendarUrl = `https://graph.microsoft.com/v1.0/me/events?$top=50&$orderby=start/dateTime desc&$select=id,subject,start,end,location,organizer,attendees,isOnlineMeeting,onlineMeetingUrl`;
 
     console.log(`[Microsoft Calendar] Calling: ${calendarUrl}`);
 
