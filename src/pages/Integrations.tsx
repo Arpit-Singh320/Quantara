@@ -123,32 +123,37 @@ export default function Integrations() {
   // Function to test Salesforce data fetch
   const testSalesforceData = async () => {
     console.log('[Integrations] Testing Salesforce data fetch...');
+    const token = localStorage.getItem('token');
+    console.log('[Integrations] JWT Token present:', !!token, token ? `(${token.substring(0, 20)}...)` : '(null)');
+
+    if (!token) {
+      toast.error('Not logged in - please log in first');
+      return;
+    }
+
+    const headers = {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    };
+
     try {
-      const accountsRes = await fetch(`${import.meta.env.VITE_API_URL || 'https://backend-production-ceb3.up.railway.app'}/api/connectors/salesforce/accounts`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
+      const accountsRes = await fetch(`${import.meta.env.VITE_API_URL || 'https://backend-production-ceb3.up.railway.app'}/api/connectors/salesforce/accounts`, { headers });
       const accounts = await accountsRes.json();
       console.log('[Salesforce] Accounts:', accounts);
 
-      const oppsRes = await fetch(`${import.meta.env.VITE_API_URL || 'https://backend-production-ceb3.up.railway.app'}/api/connectors/salesforce/opportunities`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
+      const oppsRes = await fetch(`${import.meta.env.VITE_API_URL || 'https://backend-production-ceb3.up.railway.app'}/api/connectors/salesforce/opportunities`, { headers });
       const opportunities = await oppsRes.json();
       console.log('[Salesforce] Opportunities:', opportunities);
 
-      const contactsRes = await fetch(`${import.meta.env.VITE_API_URL || 'https://backend-production-ceb3.up.railway.app'}/api/connectors/salesforce/contacts`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
+      const contactsRes = await fetch(`${import.meta.env.VITE_API_URL || 'https://backend-production-ceb3.up.railway.app'}/api/connectors/salesforce/contacts`, { headers });
       const contacts = await contactsRes.json();
       console.log('[Salesforce] Contacts:', contacts);
 
-      toast.success('Salesforce data fetched! Check console for details.');
+      if (accounts.error || opportunities.error || contacts.error) {
+        toast.error('Some Salesforce data failed to load - check console');
+      } else {
+        toast.success('Salesforce data fetched! Check console for details.');
+      }
     } catch (error) {
       console.error('[Salesforce] Error fetching data:', error);
       toast.error('Failed to fetch Salesforce data');
