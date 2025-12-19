@@ -1235,15 +1235,31 @@ router.get('/microsoft/calendar/events', authenticate, async (req: Authenticated
       return;
     }
 
+    // Decode and verify the token
+    const accessToken = tokens.accessToken.trim();
+    console.log(`[Microsoft Calendar] Access token length: ${accessToken.length}`);
+    console.log(`[Microsoft Calendar] Access token starts: ${accessToken.slice(0, 30)}`);
+
+    try {
+      const payload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString());
+      console.log(`[Microsoft Calendar] Token aud: ${payload.aud}`);
+      console.log(`[Microsoft Calendar] Token scp: ${payload.scp}`);
+      console.log(`[Microsoft Calendar] Token exp: ${payload.exp} (${new Date(payload.exp * 1000).toISOString()})`);
+    } catch (e) {
+      console.error(`[Microsoft Calendar] Failed to decode token:`, e);
+    }
+
     // Get events for next 30 days
     const now = new Date();
     const futureDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const calendarUrl = `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${encodeURIComponent(now.toISOString())}&endDateTime=${encodeURIComponent(futureDate.toISOString())}&$top=50&$orderby=start/dateTime&$select=id,subject,start,end,location,organizer,attendees,isOnlineMeeting,onlineMeetingUrl`;
 
-    const response = await fetch(`https://graph.microsoft.com/v1.0/me/calendarview?startDateTime=${now.toISOString()}&endDateTime=${futureDate.toISOString()}&$top=50&$orderby=start/dateTime&$select=id,subject,start,end,location,organizer,attendees,isOnlineMeeting,onlineMeetingUrl`, {
+    console.log(`[Microsoft Calendar] Calling: ${calendarUrl}`);
+
+    const response = await fetch(calendarUrl, {
       headers: {
-        Authorization: `Bearer ${tokens.accessToken}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'outlook.timezone="UTC"',
+        Authorization: `Bearer ${accessToken}`,
+        'Accept': 'application/json',
       },
     });
 
