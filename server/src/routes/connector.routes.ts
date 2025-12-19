@@ -515,9 +515,24 @@ const salesforceTokenStore: Map<string, SalesforceTokenData> = new Map();
 // GET /api/connectors/salesforce/callback - OAuth callback for Salesforce
 router.get('/salesforce/callback', async (req, res, next) => {
   try {
-    const { code, state } = req.query;
+    const { code, state, error, error_description } = req.query;
+
+    console.log('[Salesforce Callback] Query params:', {
+      code: code ? 'present' : 'missing',
+      state,
+      error,
+      error_description
+    });
+
+    // Check for Salesforce errors first
+    if (error) {
+      console.error('[Salesforce Callback] OAuth error from Salesforce:', error, error_description);
+      res.redirect(`${config.corsOrigin}/integrations?error=${encodeURIComponent(error as string)}&error_description=${encodeURIComponent((error_description as string) || '')}`);
+      return;
+    }
 
     if (!code) {
+      console.error('[Salesforce Callback] No code received');
       res.redirect(`${config.corsOrigin}/integrations?error=no_code`);
       return;
     }
