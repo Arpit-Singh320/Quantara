@@ -1,123 +1,280 @@
 # Quantara User & Company Flow Documentation
 
-**Last Updated: December 2024**
+**Version 2.0 | December 2024**
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [User Journey Maps](#user-journey-maps)
+3. [Authentication Flows](#authentication-flows)
+4. [Data Ownership Model](#data-ownership-model)
+5. [Core Workflows](#core-workflows)
+6. [Integration Flows](#integration-flows)
+7. [Security Implementation](#security-implementation)
+
+---
 
 ## Overview
 
-Quantara is a multi-tenant insurance broker platform where each **User** belongs to a **Company** and manages their own set of **Clients**, **Policies**, **Renewals**, **Tasks**, **Documents**, and **Quotes**. The system is designed for enterprise-grade security and data isolation.
+### What This Document Covers
 
----
+This document explains how users interact with Quantara from a workflow perspective. It covers:
 
-## Feature Implementation Status
+- How users register, login, and manage their sessions
+- How data is isolated between users (multi-tenancy)
+- Step-by-step workflows for each major feature
+- Integration flows with external services (Google Calendar, Email)
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| User Authentication | ✅ Complete | JWT + bcrypt |
-| Session Persistence | ✅ Complete | localStorage + refresh |
+### System Architecture Summary
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           USER INTERACTION LAYER                             │
+│                                                                             │
+│  Browser → React Frontend → API Calls → Express Backend → PostgreSQL       │
+│                                                                             │
+│  Every request includes JWT token → Backend validates → Scopes to userId   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Feature Implementation Status
+
+| Feature | Status | Implementation Details |
+|---------|--------|----------------------|
+| User Authentication | ✅ Complete | JWT + bcrypt, 24h token expiry |
+| Session Persistence | ✅ Complete | localStorage token, auto-refresh |
 | Data Isolation | ✅ Complete | All queries scoped by userId |
-| Client Management | ✅ Complete | Full CRUD |
-| Policy Management | ✅ Complete | Full CRUD with status |
+| Client Management | ✅ Complete | Full CRUD with search/filter |
+| Policy Management | ✅ Complete | Full CRUD with status workflow |
 | Renewal Tracking | ✅ Complete | Auto-creation, risk scoring |
-| Workflow Tasks | ✅ Complete | Task templates, progress tracking |
-| Document Management | ✅ Complete | Upload, versioning |
-| Quote Comparison | ✅ Complete | Side-by-side comparison |
-| Email Sending | ✅ Complete | Brevo integration |
-| AI Chat | ✅ Complete | Gemini integration |
-| Connector OAuth | 🔄 Partial | UI ready, needs credentials |
-| RBAC | ❌ Not Started | Future enterprise feature |
-| Multi-User Company | ❌ Not Started | Future enterprise feature |
+| Workflow Tasks | ✅ Complete | 13 templates, progress tracking |
+| Document Management | ✅ Complete | Upload, categorization, AI analysis |
+| Quote Comparison | ✅ Complete | Side-by-side, selection, binding |
+| Email Sending | ✅ Complete | Brevo integration, scheduling |
+| AI Chat | ✅ Complete | Gemini 2.0 Flash, streaming |
+| AI Briefs | ✅ Complete | Executive summaries, insights |
+| Google Calendar | ✅ Complete | OAuth, events, Google Meet |
+| Reports | ✅ Complete | Charts, analytics |
 
 ---
 
-## 1. Authentication Flow
+## User Journey Maps
 
-### 1.1 Registration Flow
-```
-User → Register Form → Backend API → Database → JWT Token → Authenticated Session
-```
+### Journey 1: New User Onboarding
 
-**Steps:**
-1. User visits `/login` and clicks "Create Account"
-2. User provides: Email, Password, Name, Company Name
-3. Frontend calls `POST /api/auth/register`
-4. Backend:
-   - Validates input (Zod schema)
-   - Checks for existing user
-   - Hashes password (bcrypt, 12 rounds)
-   - Creates User record in PostgreSQL
-   - Generates JWT token
-5. Frontend stores token in `localStorage` under `auth_token`
-6. User redirected to Dashboard
-
-### 1.2 Login Flow
 ```
-User → Login Form → Backend API → Validate Credentials → JWT Token → Session
+Day 1: Getting Started
+┌────────────────────────────────────────────────────────────────────────────┐
+│                                                                            │
+│  1. REGISTER          2. EXPLORE           3. ADD DATA       4. USE AI    │
+│  ───────────          ─────────            ──────────        ──────────   │
+│  Create account       Tour dashboard       Add first client  Try AI chat  │
+│  Set company name     View sample data     Add first policy  Generate brief│
+│  Login                Check features       Initiate renewal  Send email   │
+│                                                                            │
+│  Time: 2 min          Time: 5 min          Time: 10 min      Time: 5 min  │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Steps:**
-1. User enters email and password
-2. Frontend calls `POST /api/auth/login`
-3. Backend:
-   - Finds user by email
-   - Compares password hash
-   - Updates `lastLoginAt` timestamp
-   - Generates JWT token
-4. Token stored in `localStorage`
-5. `AuthContext` updates with user data
-6. User redirected to Dashboard
+### Journey 2: Daily Workflow (Experienced User)
 
-### 1.3 Session Persistence (Refresh)
 ```
-Page Load → Check localStorage → Validate Token → Fetch User → Restore Session
+Morning Routine (15 minutes)
+┌────────────────────────────────────────────────────────────────────────────┐
+│                                                                            │
+│  8:00 AM              8:05 AM              8:10 AM           8:15 AM       │
+│  ────────             ────────             ────────          ────────      │
+│  Open Dashboard       Review at-risk       Complete tasks    Send emails  │
+│  Check priorities     Check calendar       Update quotes     Schedule calls│
+│  Scan AI insights     Plan meetings        Upload docs                    │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Implementation:**
+### Journey 3: Client Meeting Preparation
+
+```
+Before Meeting (5 minutes with Quantara vs 45 minutes without)
+┌────────────────────────────────────────────────────────────────────────────┐
+│                                                                            │
+│  1. Find Renewal      2. Generate Brief    3. Review          4. Go!      │
+│  ──────────────       ─────────────────    ───────────        ──────      │
+│  Search client        Click "Brief"        Read summary       Meeting     │
+│  Open renewal         Wait 3 seconds       Note key points    ready!      │
+│  See all context      Brief generated      Check talking pts              │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Authentication Flows
+
+### Registration Flow
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Browser   │     │   Frontend  │     │   Backend   │     │  Database   │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │                   │                   │                   │
+       │  Fill form        │                   │                   │
+       │  Click Register   │                   │                   │
+       │──────────────────►│                   │                   │
+       │                   │  POST /register   │                   │
+       │                   │  {email, pass,    │                   │
+       │                   │   name, company}  │                   │
+       │                   │──────────────────►│                   │
+       │                   │                   │                   │
+       │                   │                   │  Validate input   │
+       │                   │                   │  (Zod schema)     │
+       │                   │                   │                   │
+       │                   │                   │  Check existing   │
+       │                   │                   │──────────────────►│
+       │                   │                   │◄──────────────────│
+       │                   │                   │                   │
+       │                   │                   │  Hash password    │
+       │                   │                   │  (bcrypt, 12)     │
+       │                   │                   │                   │
+       │                   │                   │  Create user      │
+       │                   │                   │──────────────────►│
+       │                   │                   │◄──────────────────│
+       │                   │                   │                   │
+       │                   │                   │  Generate JWT     │
+       │                   │                   │  (24h expiry)     │
+       │                   │                   │                   │
+       │                   │  {token, user}    │                   │
+       │                   │◄──────────────────│                   │
+       │                   │                   │                   │
+       │                   │  Store token      │                   │
+       │                   │  localStorage     │                   │
+       │                   │                   │                   │
+       │  Redirect to      │                   │                   │
+       │  Dashboard        │                   │                   │
+       │◄──────────────────│                   │                   │
+```
+
+### Login Flow
+
+```
+User enters email + password
+    ↓
+Frontend validates (non-empty)
+    ↓
+POST /api/auth/login
+    ↓
+Backend finds user by email
+    ↓
+bcrypt.compare(password, hash)
+    ↓
+If match: Generate JWT, return token + user
+    ↓
+Frontend stores in localStorage
+    ↓
+AuthContext updates (isAuthenticated = true)
+    ↓
+Redirect to Dashboard
+```
+
+### Session Persistence
+
+When the page loads or refreshes:
+
 ```typescript
-// AuthContext.tsx
+// src/context/AuthContext.tsx
 useEffect(() => {
-  const token = localStorage.getItem('auth_token');
-  if (token) {
-    api.setToken(token);
-    refreshUser(); // Calls GET /api/auth/me
-  }
+  const initAuth = async () => {
+    const token = localStorage.getItem('auth_token');
+    if (token) {
+      api.setToken(token);
+      try {
+        const response = await api.getCurrentUser();
+        setUser(response.user);
+        setIsAuthenticated(true);
+      } catch {
+        // Token invalid, clear it
+        localStorage.removeItem('auth_token');
+      }
+    }
+    setIsLoading(false);
+  };
+  initAuth();
 }, []);
 ```
 
-### 1.4 Logout Flow
-```
-User → Logout → Clear Token → Redirect to Login
-```
+### Logout Flow
 
-**Steps:**
-1. User clicks logout (avatar dropdown or settings)
-2. `POST /api/auth/logout` called
-3. Token removed from `localStorage`
-4. `AuthContext` cleared
-5. User redirected to `/login`
+```
+User clicks Logout
+    ↓
+POST /api/auth/logout (optional server-side)
+    ↓
+localStorage.removeItem('auth_token')
+    ↓
+AuthContext.setUser(null)
+    ↓
+Redirect to /login
+```
 
 ---
 
-## 2. Data Ownership Model
+## Data Ownership Model
 
-### 2.1 Multi-Tenant Architecture
-Every data record is scoped to a specific user:
+### Multi-Tenant Architecture
+
+Every piece of data in Quantara is owned by a specific user. This ensures complete data isolation between users—one broker cannot see another broker's clients, policies, or renewals.
 
 ```
 User (id: "user_123")
+│
 ├── Clients (userId: "user_123")
-│   ├── Client A
-│   └── Client B
+│   ├── TechFlow Industries
+│   ├── Meridian Healthcare
+│   └── Summit Manufacturing
+│
 ├── Policies (userId: "user_123")
-│   ├── Policy for Client A
-│   └── Policy for Client B
+│   ├── TechFlow - Cyber Liability
+│   ├── TechFlow - General Liability
+│   ├── Meridian - D&O
+│   └── Summit - Workers Comp
+│
 ├── Renewals (userId: "user_123")
-│   ├── Renewal for Policy A
-│   │   ├── Tasks (13 default tasks per renewal)
-│   │   ├── Quotes (carrier quotes for comparison)
-│   │   └── Documents (policy docs, loss runs, etc.)
-│   └── Renewal for Policy B
-└── Connections (OAuth tokens for integrations)
+│   ├── TechFlow Cyber Renewal
+│   │   ├── Tasks (13 workflow tasks)
+│   │   ├── Quotes (Hartford, Liberty, Travelers)
+│   │   ├── Documents (Loss run, Application)
+│   │   └── Activities (Email sent, Quote received)
+│   └── Meridian D&O Renewal
+│       ├── Tasks
+│       ├── Quotes
+│       └── Documents
+│
+└── Connections (userId: "user_123")
+    └── Google (OAuth tokens for calendar)
 ```
+
+### How Data Isolation Works
+
+Every API query includes the user's ID from their JWT token:
+
+```typescript
+// Example: GET /api/clients
+router.get('/', authenticate, async (req, res) => {
+  const userId = req.user?.id; // Extracted from JWT
+
+  const clients = await prisma.client.findMany({
+    where: { userId }, // CRITICAL: Only this user's data
+    include: { policies: true }
+  });
+
+  res.json({ clients });
+});
+```
+
+This pattern is applied to ALL data queries, ensuring users can never access data belonging to other users.
 
 ### 2.2 Database Schema (Current)
 ```prisma
