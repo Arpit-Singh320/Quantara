@@ -937,6 +937,48 @@ class ApiClient {
     });
   }
 
+  async scheduleEmail(data: {
+    to: string;
+    toName?: string;
+    subject: string;
+    body: string;
+    clientId?: string;
+    scheduledAt: string;
+  }) {
+    // Map scheduledAt to scheduledFor for backend compatibility
+    const { scheduledAt, ...rest } = data;
+    return this.request<{
+      success: boolean;
+      message: string;
+      scheduledEmailId?: string;
+      scheduledAt?: string;
+    }>('/api/email/schedule', {
+      method: 'POST',
+      body: JSON.stringify({ ...rest, scheduledFor: scheduledAt }),
+    });
+  }
+
+  async getScheduledEmails() {
+    return this.request<{
+      scheduledEmails: Array<{
+        id: string;
+        to: string;
+        subject: string;
+        scheduledAt: string;
+        status: 'PENDING' | 'SENT' | 'FAILED' | 'CANCELLED';
+      }>;
+    }>('/api/email/scheduled');
+  }
+
+  async cancelScheduledEmail(id: string) {
+    return this.request<{
+      success: boolean;
+      message: string;
+    }>(`/api/email/scheduled/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   // ============ HEALTH ============
 
   async healthCheck() {

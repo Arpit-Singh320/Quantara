@@ -4,7 +4,7 @@
  */
 
 import { useState } from 'react';
-import { Loader2, Mail, Sparkles, Send, Copy, Check } from 'lucide-react';
+import { Loader2, Mail, Sparkles, Send, Copy, Check, Clock, CalendarClock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -104,6 +104,10 @@ export function EmailDialog({
     subject: '',
     body: '',
   });
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('09:00');
+  const [isScheduling, setIsScheduling] = useState(false);
 
   const handleGenerateEmail = async () => {
     if (!purpose) {
@@ -182,12 +186,59 @@ export function EmailDialog({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleScheduleEmail = async () => {
+    if (!emailData.to || !emailData.subject || !emailData.body) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+    if (!scheduleDate || !scheduleTime) {
+      toast.error('Please select date and time');
+      return;
+    }
+
+    setIsScheduling(true);
+    try {
+      const scheduledAt = new Date(`${scheduleDate}T${scheduleTime}:00`);
+      const response = await api.scheduleEmail({
+        to: emailData.to,
+        toName: clientName,
+        subject: emailData.subject,
+        body: emailData.body,
+        clientId: renewalId,
+        scheduledAt: scheduledAt.toISOString(),
+      });
+
+      if (response.data?.success) {
+        toast.success(`Email scheduled for ${scheduledAt.toLocaleString()}`);
+        onSuccess?.();
+        handleClose();
+      } else {
+        toast.error(response.error || 'Failed to schedule email');
+      }
+    } catch (error) {
+      console.error('Failed to schedule email:', error);
+      toast.error('Failed to schedule email');
+    } finally {
+      setIsScheduling(false);
+    }
+  };
+
   const handleClose = () => {
     setStep('select');
     setPurpose('');
     setTone('friendly');
     setEmailData({ to: clientEmail || '', subject: '', body: '' });
+    setShowSchedule(false);
+    setScheduleDate('');
+    setScheduleTime('09:00');
     onOpenChange(false);
+  };
+
+  // Get tomorrow's date as minimum for scheduling
+  const getMinDate = () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return tomorrow.toISOString().split('T')[0];
   };
 
   return (
@@ -323,6 +374,51 @@ export function EmailDialog({
               <span className="text-muted-foreground">AI-generated draft. Feel free to edit before sending.</span>
             </div>
 
+            {/* Schedule Options */}
+            {showSchedule && (
+              <div className="p-4 rounded-lg border bg-muted/30 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <CalendarClock className="h-4 w-4 text-primary" />
+                  Schedule Email
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="schedule-date" className="text-xs">Date</Label>
+                    <Input
+                      id="schedule-date"
+                      type="date"
+                      value={scheduleDate}
+                      onChange={(e) => setScheduleDate(e.target.value)}
+                      min={getMinDate()}
+                      className="text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="schedule-time" className="text-xs">Time</Label>
+                    <Input
+                      id="schedule-time"
+                      type="time"
+                      value={scheduleTime}
+                      onChange={(e) => setScheduleTime(e.target.value)}
+                      className="text-sm"
+                    />
+                  </div>
+                </div>
+                <Button
+                  onClick={handleScheduleEmail}
+                  disabled={isScheduling || !scheduleDate}
+                  className="w-full"
+                  variant="secondary"
+                >
+                  {isScheduling ? (
+                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Scheduling...</>
+                  ) : (
+                    <><Clock className="h-4 w-4 mr-2" />Schedule for {scheduleDate ? new Date(`${scheduleDate}T${scheduleTime}`).toLocaleString() : 'selected time'}</>
+                  )}
+                </Button>
+              </div>
+            )}
+
             <DialogFooter className="gap-2">
               <Button variant="outline" onClick={() => setStep('select')}>
                 Back
@@ -335,6 +431,13 @@ export function EmailDialog({
                 {isGenerating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
                 Regenerate
               </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowSchedule(!showSchedule)}
+              >
+                <Clock className="h-4 w-4 mr-2" />
+                {showSchedule ? 'Hide Schedule' : 'Schedule'}
+              </Button>
               <Button onClick={handleSendEmail} disabled={isSending}>
                 {isSending ? (
                   <>
@@ -344,7 +447,7 @@ export function EmailDialog({
                 ) : (
                   <>
                     <Send className="h-4 w-4 mr-2" />
-                    Send Email
+                    Send Now
                   </>
                 )}
               </Button>
