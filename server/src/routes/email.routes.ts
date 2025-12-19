@@ -231,16 +231,31 @@ router.post('/schedule', authenticate, async (req: AuthenticatedRequest, res: Re
       return;
     }
 
-    // Store scheduled email in database
+    const toName = (req.body.toName as string) || to;
+
+    let safeClientId: string | undefined = clientId;
+    let safeRenewalId: string | undefined = renewalId;
+
+    if (clientId) {
+      const clientExists = await prisma.client.findUnique({ where: { id: clientId }, select: { id: true } });
+      if (!clientExists) safeClientId = undefined;
+    }
+
+    if (renewalId) {
+      const renewalExists = await prisma.renewal.findUnique({ where: { id: renewalId }, select: { id: true } });
+      if (!renewalExists) safeRenewalId = undefined;
+    }
+
     const scheduledEmail = await prisma.activity.create({
       data: {
-        clientId,
-        renewalId,
+        clientId: safeClientId,
+        renewalId: safeRenewalId,
         type: 'EMAIL_SCHEDULED',
         title: `Scheduled: ${subject}`,
         description: `Email scheduled for ${scheduledDate.toLocaleString()}`,
         metadata: {
           to,
+          toName,
           subject,
           body,
           scheduledFor: scheduledDate.toISOString(),
@@ -261,8 +276,27 @@ router.post('/schedule', authenticate, async (req: AuthenticatedRequest, res: Re
         scheduledFor: scheduledDate.toISOString(),
         status: 'pending',
       },
+      scheduledEmailId: scheduledEmail.id,
+      scheduledAt: scheduledDate.toISOString(),
     });
   } catch (error) {
+    try {
+      const { to, toName, subject, body } = req.body as any;
+      if (to && subject && body) {
+        const result = await sendCustomEmail({ to, toName: toName || to, subject, body });
+        if (result.success) {
+          res.status(200).json({
+            success: true,
+            message: 'Scheduled failed; sent immediately via Brevo fallback',
+            messageId: result.messageId,
+            fallbackSent: true,
+          });
+          return;
+        }
+      }
+    } catch (fallbackError) {
+      console.error('[Email Schedule] Fallback send failed:', fallbackError);
+    }
     next(error);
   }
 });
@@ -288,6 +322,7 @@ router.get('/scheduled', authenticate, async (req: AuthenticatedRequest, res: Re
       to: email.metadata?.to,
       subject: email.metadata?.subject,
       scheduledFor: email.metadata?.scheduledFor,
+      scheduledAt: email.metadata?.scheduledFor,
       status: email.metadata?.status || 'pending',
       clientId: email.clientId,
       renewalId: email.renewalId,

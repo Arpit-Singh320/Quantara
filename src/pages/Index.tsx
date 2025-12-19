@@ -7,6 +7,8 @@ import {
   Lightbulb, LayoutDashboard, Users, FileText, Settings, PanelLeftClose, PanelLeft,
   Building, BarChart3, Cloud, Database, Play, Pause, Plus, ChevronDown
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -520,7 +522,37 @@ function ChatInterface({ onClose, clientContext }: { onClose: () => void; client
             <div key={m.id} className={cn('flex gap-3', m.role === 'user' ? 'flex-row-reverse' : '')}>
               <div className={cn('shrink-0 h-8 w-8 rounded-lg flex items-center justify-center text-sm font-medium', m.role === 'user' ? 'bg-primary text-primary-foreground' : 'gradient-ai text-accent-foreground')}>{m.role === 'user' ? userInitials : <Sparkles className="h-4 w-4" />}</div>
               <div className={cn('flex-1 max-w-[85%]', m.role === 'user' && 'text-right')}>
-                <div className={cn('inline-block p-3 rounded-2xl text-sm', m.role === 'user' ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-secondary rounded-tl-sm')}><p className="whitespace-pre-wrap">{m.content}</p></div>
+                <div className={cn('inline-block p-3 rounded-2xl text-sm', m.role === 'user' ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-secondary rounded-tl-sm')}>
+                  {m.role === 'assistant' ? (
+                    <div className="space-y-2 leading-relaxed">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          h1: ({node, ...props}) => <h1 className="text-base font-semibold mb-1" {...props} />,
+                          h2: ({node, ...props}) => <h2 className="text-sm font-semibold mb-1" {...props} />,
+                          h3: ({node, ...props}) => <h3 className="text-sm font-semibold mb-1" {...props} />,
+                          p: ({node, ...props}) => <p className="text-sm" {...props} />,
+                          strong: ({node, ...props}) => <strong className="font-semibold" {...props} />,
+                          em: ({node, ...props}) => <em className="italic" {...props} />,
+                          ul: ({node, ...props}) => <ul className="list-disc pl-5 my-2 space-y-1" {...props} />,
+                          ol: ({node, ...props}) => <ol className="list-decimal pl-5 my-2 space-y-1" {...props} />,
+                          li: ({node, ...props}) => <li className="text-sm" {...props} />,
+                          blockquote: ({node, ...props}) => <blockquote className="border-l-2 pl-3 my-2 text-muted-foreground" {...props} />,
+                          code: ({node, className, children, ...props}) => {
+                            const isInline = !className;
+                            return isInline
+                              ? <code className="bg-muted text-foreground/90 px-1 py-0.5 rounded text-[11px] font-mono" {...props}>{children}</code>
+                              : <pre className="bg-muted p-3 rounded-lg overflow-x-auto text-[12px]"><code className={className} {...props}>{children}</code></pre>;
+                          },
+                        }}
+                      >
+                        {m.content}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="whitespace-pre-wrap">{m.content}</p>
+                  )}
+                </div>
                 {m.sources && m.sources.length > 0 && <div className="flex flex-wrap gap-1 mt-2">{m.sources.map((s, i) => <Badge key={i} variant="source" className="cursor-pointer hover:bg-muted"><SourceIcon type={s.type} size="sm" /><span className="text-[10px]">{s.label}</span></Badge>)}</div>}
                 {m.role === 'assistant' && (
                   <div className="flex items-center gap-2 mt-2">
@@ -557,7 +589,7 @@ function ChatInterface({ onClose, clientContext }: { onClose: () => void; client
 }
 
 // ============ COMMAND PALETTE ============
-function CommandPalette({ onClose, onSelectRenewal, onOpenChat }: { onClose: () => void; onSelectRenewal: (r: Renewal) => void; onOpenChat: () => void }) {
+function CommandPalette({ onClose, onSelectRenewal, onOpenChat }: { onClose: () => void; onSelectRenewal: (r: DashboardRenewal) => void; onOpenChat: () => void }) {
   const [search, setSearch] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { inputRef.current?.focus(); }, []);
@@ -698,7 +730,7 @@ export default function Index() {
       </div>
       {selectedRenewal && <BriefModal renewal={selectedRenewal} onClose={() => setSelectedRenewal(null)} onOpenChat={() => { setSelectedRenewal(null); setIsChatOpen(true); }} />}
       {isChatOpen && <ChatInterface onClose={() => setIsChatOpen(false)} clientContext={selectedRenewal?.client.company} />}
-      {isCommandOpen && <CommandPalette onClose={() => setIsCommandOpen(false)} onSelectRenewal={(r) => setSelectedRenewal(transformRenewal(r as unknown as APIRenewal))} onOpenChat={() => setIsChatOpen(true)} />}
+      {isCommandOpen && <CommandPalette onClose={() => setIsCommandOpen(false)} onSelectRenewal={(r) => setSelectedRenewal(r)} onOpenChat={() => setIsChatOpen(true)} />}
       <Button variant="ai" size="icon" className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg xl:hidden" onClick={() => setIsChatOpen(true)}><Sparkles className="h-6 w-6" /></Button>
 
       {/* Email Dialog */}
@@ -727,14 +759,14 @@ export default function Index() {
           policy={{
             carrier: emailDialogRenewal.policy.carrier,
             premium: emailDialogRenewal.policy.premium,
-            coverage: emailDialogRenewal.policy.coverage,
-            expiryDate: emailDialogRenewal.expiryDate,
+            coverage: emailDialogRenewal.policy.coverageLimit,
+            expiryDate: new Date(Date.now() + emailDialogRenewal.daysUntilRenewal * 24 * 60 * 60 * 1000).toISOString(),
             daysUntilRenewal: emailDialogRenewal.daysUntilRenewal,
           }}
           activity={{
             emailsSent: emailDialogRenewal.emailsSent || 0,
-            quotes: emailDialogRenewal.quotes || 0,
-            riskLevel: emailDialogRenewal.riskLevel,
+            quotes: emailDialogRenewal.quotesReceived || 0,
+            riskLevel: emailDialogRenewal.riskScore,
           }}
         />
       )}
