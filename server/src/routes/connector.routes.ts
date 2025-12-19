@@ -16,16 +16,99 @@ const prisma = new PrismaClient();
 // Supported connector types
 type ConnectorType = 'salesforce' | 'microsoft' | 'google' | 'hubspot';
 
-// Token store for OAuth tokens (in production, encrypt and store in DB)
+// Token store for OAuth tokens - use database for persistence
 interface TokenData {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: Date;
   scope?: string;
+  instanceUrl?: string; // For Salesforce
+  userEmail?: string; // For Microsoft
 }
-const tokenStore: Map<string, TokenData> = new Map();
 
-// In-memory connection store (replace with database in production)
+// Database-backed token storage helpers
+async function saveTokenToDb(userId: string, type: ConnectorType, tokenData: TokenData): Promise<void> {
+  const connectionType = type.toUpperCase() as 'SALESFORCE' | 'MICROSOFT' | 'GOOGLE' | 'HUBSPOT';
+  try {
+    await prisma.connection.upsert({
+      where: { userId_type: { userId, type: connectionType } },
+      update: {
+        accessToken: tokenData.accessToken,
+        refreshToken: tokenData.refreshToken || null,
+        expiresAt: tokenData.expiresAt || null,
+        scopes: tokenData.scope ? [tokenData.scope] : [],
+        metadata: { instanceUrl: tokenData.instanceUrl, userEmail: tokenData.userEmail },
+        status: 'ACTIVE',
+        lastSyncAt: new Date(),
+      },
+      create: {
+        userId,
+        type: connectionType,
+        accessToken: tokenData.accessToken,
+        refreshToken: tokenData.refreshToken || null,
+        expiresAt: tokenData.expiresAt || null,
+        scopes: tokenData.scope ? [tokenData.scope] : [],
+        metadata: { instanceUrl: tokenData.instanceUrl, userEmail: tokenData.userEmail },
+        status: 'ACTIVE',
+      },
+    });
+    console.log(`[TokenDB] Saved ${type} token for user ${userId}`);
+  } catch (error) {
+    console.error(`[TokenDB] Failed to save ${type} token:`, error);
+  }
+}
+
+async function getTokenFromDb(userId: string, type: ConnectorType): Promise<TokenData | null> {
+  const connectionType = type.toUpperCase() as 'SALESFORCE' | 'MICROSOFT' | 'GOOGLE' | 'HUBSPOT';
+  try {
+    const connection = await prisma.connection.findUnique({
+      where: { userId_type: { userId, type: connectionType } },
+    });
+    if (connection && connection.status === 'ACTIVE') {
+      const metadata = connection.metadata as any;
+      return {
+        accessToken: connection.accessToken,
+        refreshToken: connection.refreshToken || undefined,
+        expiresAt: connection.expiresAt || undefined,
+        scope: connection.scopes?.join(' '),
+        instanceUrl: metadata?.instanceUrl,
+        userEmail: metadata?.userEmail,
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error(`[TokenDB] Failed to get ${type} token:`, error);
+    return null;
+  }
+}
+
+async function deleteTokenFromDb(userId: string, type: ConnectorType): Promise<void> {
+  const connectionType = type.toUpperCase() as 'SALESFORCE' | 'MICROSOFT' | 'GOOGLE' | 'HUBSPOT';
+  try {
+    await prisma.connection.updateMany({
+      where: { userId, type: connectionType },
+      data: { status: 'REVOKED' },
+    });
+    console.log(`[TokenDB] Revoked ${type} token for user ${userId}`);
+  } catch (error) {
+    console.error(`[TokenDB] Failed to revoke ${type} token:`, error);
+  }
+}
+
+async function isConnectedInDb(userId: string, type: ConnectorType): Promise<boolean> {
+  const connectionType = type.toUpperCase() as 'SALESFORCE' | 'MICROSOFT' | 'GOOGLE' | 'HUBSPOT';
+  try {
+    const connection = await prisma.connection.findUnique({
+      where: { userId_type: { userId, type: connectionType } },
+    });
+    return connection?.status === 'ACTIVE';
+  } catch {
+    return false;
+  }
+}
+
+// In-memory stores for backward compatibility during transition
+const tokenStore: Map<string, TokenData> = new Map();
 const connections: Map<string, { userId: string; type: ConnectorType; connected: boolean; lastSync?: string }> = new Map();
 
 // PKCE code verifier store (keyed by state/userId)
@@ -48,14 +131,20 @@ const connectSchema = z.object({
 });
 
 // GET /api/connectors
-router.get('/', authenticate, (req: AuthenticatedRequest, res: Response) => {
+router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
+  if (!userId) {
+    res.json({ connectors: {} });
+    return;
+  }
 
-  // Check if tokens actually exist (not just connection record)
-  const hasGoogleTokens = tokenStore.has(`${userId}-google`);
-  const hasSalesforceTokens = tokenStore.has(`${userId}-salesforce`);
-  const hasMicrosoftTokens = tokenStore.has(`${userId}-microsoft`);
-  const hasHubspotTokens = tokenStore.has(`${userId}-hubspot`);
+  // Check if tokens exist in database (persistent storage)
+  const [hasGoogleTokens, hasSalesforceTokens, hasMicrosoftTokens, hasHubspotTokens] = await Promise.all([
+    isConnectedInDb(userId, 'google'),
+    isConnectedInDb(userId, 'salesforce'),
+    isConnectedInDb(userId, 'microsoft'),
+    isConnectedInDb(userId, 'hubspot'),
+  ]);
 
   const connectorStatus = {
     salesforce: {
@@ -288,26 +377,17 @@ router.get('/google/callback', async (req, res, next) => {
       return;
     }
 
-    const tokenKey = `${callbackUserId}-google`;
+    console.log(`[Google OAuth] Storing tokens for user: ${callbackUserId}`);
 
-    console.log(`[Google OAuth] Storing tokens for user: ${callbackUserId}, key: ${tokenKey}`);
-
-    tokenStore.set(tokenKey, {
+    // Save to database for persistence
+    await saveTokenToDb(callbackUserId, 'google', {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       expiresAt: new Date(Date.now() + tokens.expires_in * 1000),
       scope: tokens.scope,
     });
 
-    // Mark as connected
-    connections.set(tokenKey, {
-      userId: callbackUserId,
-      type: 'google',
-      connected: true,
-      lastSync: new Date().toISOString(),
-    });
-
-    console.log(`[Google OAuth] Token stored successfully. TokenStore has key: ${tokenStore.has(tokenKey)}`);
+    console.log(`[Google OAuth] Token saved to database successfully`);
 
     // Redirect to calendar page with success
     res.redirect(`${config.corsOrigin}/calendar?connected=google`);
@@ -326,12 +406,11 @@ router.get('/google/calendar/events', authenticate, async (req: AuthenticatedReq
       return;
     }
 
-    const tokenKey = `${userId}-google`;
-    const tokens = tokenStore.get(tokenKey);
+    // Get tokens from database
+    const tokens = await getTokenFromDb(userId, 'google');
 
-    console.log(`[Google Calendar] Fetching events for user: ${userId}, tokenKey: ${tokenKey}`);
-    console.log(`[Google Calendar] TokenStore keys: ${Array.from(tokenStore.keys()).join(', ')}`);
-    console.log(`[Google Calendar] Token exists: ${!!tokens}`);
+    console.log(`[Google Calendar] Fetching events for user: ${userId}`);
+    console.log(`[Google Calendar] Token exists in DB: ${!!tokens}`);
 
     if (!tokens) {
       next(createError('Google not connected. Please connect your Google account first.', 401));
@@ -340,6 +419,7 @@ router.get('/google/calendar/events', authenticate, async (req: AuthenticatedReq
 
     // Check if token is expired and refresh if needed
     if (tokens.expiresAt && tokens.expiresAt < new Date() && tokens.refreshToken) {
+      console.log(`[Google Calendar] Token expired, refreshing...`);
       const refreshResponse = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -355,7 +435,9 @@ router.get('/google/calendar/events', authenticate, async (req: AuthenticatedReq
         const newTokens = await refreshResponse.json() as { access_token: string; expires_in: number };
         tokens.accessToken = newTokens.access_token;
         tokens.expiresAt = new Date(Date.now() + newTokens.expires_in * 1000);
-        tokenStore.set(tokenKey, tokens);
+        // Update database with refreshed token
+        await saveTokenToDb(userId, 'google', tokens);
+        console.log(`[Google Calendar] Token refreshed and saved`);
       }
     }
 
@@ -611,35 +693,18 @@ router.get('/salesforce/callback', async (req, res, next) => {
       id: string;
     };
 
-    // callbackUserId already declared above for PKCE
-    const tokenKey = `${callbackUserId}-salesforce`;
-
-    console.log(`[Salesforce OAuth] Storing tokens for user: ${callbackUserId}, key: ${tokenKey}`);
+    console.log(`[Salesforce OAuth] Storing tokens for user: ${callbackUserId}`);
     console.log(`[Salesforce OAuth] Instance URL: ${tokens.instance_url}`);
 
-    // Store in both token stores
-    tokenStore.set(tokenKey, {
+    // Save to database for persistence
+    await saveTokenToDb(callbackUserId, 'salesforce', {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2 hours default
-    });
-
-    salesforceTokenStore.set(tokenKey, {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
       instanceUrl: tokens.instance_url,
     });
 
-    // Mark as connected
-    connections.set(tokenKey, {
-      userId: callbackUserId,
-      type: 'salesforce',
-      connected: true,
-      lastSync: new Date().toISOString(),
-    });
-
-    console.log(`[Salesforce OAuth] Token stored successfully. TokenStore has key: ${tokenStore.has(tokenKey)}`);
+    console.log(`[Salesforce OAuth] Token saved to database successfully`);
 
     // Redirect to integrations page with success
     res.redirect(`${config.corsOrigin}/integrations?connected=salesforce`);
@@ -658,13 +723,19 @@ router.get('/salesforce/accounts', authenticate, async (req: AuthenticatedReques
       return;
     }
 
-    const tokenKey = `${userId}-salesforce`;
-    const tokens = salesforceTokenStore.get(tokenKey);
+    // Get tokens from database
+    const tokens = await getTokenFromDb(userId, 'salesforce');
 
-    console.log(`[Salesforce] Fetching accounts for user: ${userId}, tokenKey: ${tokenKey}`);
+    console.log(`[Salesforce] Fetching accounts for user: ${userId}`);
+    console.log(`[Salesforce] Token exists in DB: ${!!tokens}`);
 
     if (!tokens) {
       next(createError('Salesforce not connected. Please connect your Salesforce account first.', 401));
+      return;
+    }
+
+    if (!tokens.instanceUrl) {
+      next(createError('Salesforce instance URL not found. Please reconnect.', 401));
       return;
     }
 
@@ -685,9 +756,7 @@ router.get('/salesforce/accounts', authenticate, async (req: AuthenticatedReques
 
       // Check if token expired
       if (accountsResponse.status === 401) {
-        tokenStore.delete(tokenKey);
-        salesforceTokenStore.delete(tokenKey);
-        connections.delete(tokenKey);
+        await deleteTokenFromDb(userId, 'salesforce');
         next(createError('Salesforce session expired. Please reconnect.', 401));
         return;
       }
@@ -736,10 +805,10 @@ router.get('/salesforce/opportunities', authenticate, async (req: AuthenticatedR
       return;
     }
 
-    const tokenKey = `${userId}-salesforce`;
-    const tokens = salesforceTokenStore.get(tokenKey);
+    // Get tokens from database
+    const tokens = await getTokenFromDb(userId, 'salesforce');
 
-    if (!tokens) {
+    if (!tokens || !tokens.instanceUrl) {
       next(createError('Salesforce not connected', 401));
       return;
     }
@@ -802,10 +871,10 @@ router.get('/salesforce/contacts', authenticate, async (req: AuthenticatedReques
       return;
     }
 
-    const tokenKey = `${userId}-salesforce`;
-    const tokens = salesforceTokenStore.get(tokenKey);
+    // Get tokens from database
+    const tokens = await getTokenFromDb(userId, 'salesforce');
 
-    if (!tokens) {
+    if (!tokens || !tokens.instanceUrl) {
       next(createError('Salesforce not connected', 401));
       return;
     }
@@ -867,10 +936,10 @@ router.get('/salesforce/activities', authenticate, async (req: AuthenticatedRequ
       return;
     }
 
-    const tokenKey = `${userId}-salesforce`;
-    const tokens = salesforceTokenStore.get(tokenKey);
+    // Get tokens from database
+    const tokens = await getTokenFromDb(userId, 'salesforce');
 
-    if (!tokens) {
+    if (!tokens || !tokens.instanceUrl) {
       next(createError('Salesforce not connected', 401));
       return;
     }
@@ -1050,32 +1119,16 @@ router.get('/microsoft/callback', async (req, res, next) => {
       console.error('[Microsoft OAuth] Failed to fetch user info:', e);
     }
 
-    // Store in both token stores
-    tokenStore.set(tokenKey, {
+    // Save to database for persistence
+    await saveTokenToDb(callbackUserId, 'microsoft', {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       expiresAt: new Date(Date.now() + tokens.expires_in * 1000),
       scope: tokens.scope,
-    });
-
-    microsoftTokenStore.set(tokenKey, {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiresAt: new Date(Date.now() + tokens.expires_in * 1000),
-      scope: tokens.scope,
-      idToken: tokens.id_token,
       userEmail,
     });
 
-    // Mark as connected
-    connections.set(tokenKey, {
-      userId: callbackUserId,
-      type: 'microsoft',
-      connected: true,
-      lastSync: new Date().toISOString(),
-    });
-
-    console.log(`[Microsoft OAuth] Token stored successfully. TokenStore has key: ${tokenStore.has(tokenKey)}`);
+    console.log(`[Microsoft OAuth] Token saved to database successfully`);
 
     // Redirect to calendar page with success (like Google does)
     res.redirect(`${config.corsOrigin}/calendar?connected=microsoft`);
@@ -1094,10 +1147,11 @@ router.get('/microsoft/emails', authenticate, async (req: AuthenticatedRequest, 
       return;
     }
 
-    const tokenKey = `${userId}-microsoft`;
-    const tokens = microsoftTokenStore.get(tokenKey);
+    // Get tokens from database
+    const tokens = await getTokenFromDb(userId, 'microsoft');
 
     console.log(`[Microsoft Mail] Fetching emails for user: ${userId}`);
+    console.log(`[Microsoft Mail] Token exists in DB: ${!!tokens}`);
 
     if (!tokens) {
       next(createError('Microsoft not connected. Please connect your Microsoft account first.', 401));
@@ -1117,10 +1171,8 @@ router.get('/microsoft/emails', authenticate, async (req: AuthenticatedRequest, 
       console.error('[Microsoft Mail] Failed to fetch emails:', error);
 
       if (response.status === 401) {
-        // Token expired, clear it
-        tokenStore.delete(tokenKey);
-        microsoftTokenStore.delete(tokenKey);
-        connections.delete(tokenKey);
+        // Token expired, clear it from database
+        await deleteTokenFromDb(userId, 'microsoft');
         next(createError('Microsoft session expired. Please reconnect.', 401));
         return;
       }
@@ -1165,10 +1217,11 @@ router.get('/microsoft/calendar/events', authenticate, async (req: Authenticated
       return;
     }
 
-    const tokenKey = `${userId}-microsoft`;
-    const tokens = microsoftTokenStore.get(tokenKey);
+    // Get tokens from database
+    const tokens = await getTokenFromDb(userId, 'microsoft');
 
     console.log(`[Microsoft Calendar] Fetching events for user: ${userId}`);
+    console.log(`[Microsoft Calendar] Token exists in DB: ${!!tokens}`);
 
     if (!tokens) {
       next(createError('Microsoft not connected. Please connect your Microsoft account first.', 401));
@@ -1192,9 +1245,7 @@ router.get('/microsoft/calendar/events', authenticate, async (req: Authenticated
       console.error('[Microsoft Calendar] Failed to fetch events:', error);
 
       if (response.status === 401) {
-        tokenStore.delete(tokenKey);
-        microsoftTokenStore.delete(tokenKey);
-        connections.delete(tokenKey);
+        await deleteTokenFromDb(userId, 'microsoft');
         next(createError('Microsoft session expired. Please reconnect.', 401));
         return;
       }
