@@ -102,7 +102,9 @@ router.get('/:type/auth-url', authenticate, (req: AuthenticatedRequest, res: Res
         next(createError('Google not configured', 500));
         return;
       }
-      authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${config.googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20email%20profile%20https://www.googleapis.com/auth/gmail.readonly%20https://www.googleapis.com/auth/calendar%20https://www.googleapis.com/auth/calendar.events&access_type=offline&prompt=consent`;
+      // Include user ID in state parameter so callback can associate tokens with the user
+      const userId = req.user?.id || '';
+      authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${config.googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20email%20profile%20https://www.googleapis.com/auth/gmail.readonly%20https://www.googleapis.com/auth/calendar%20https://www.googleapis.com/auth/calendar.events&access_type=offline&prompt=consent&state=${encodeURIComponent(userId)}`;
       break;
 
     case 'hubspot':
@@ -247,9 +249,18 @@ router.get('/google/callback', async (req, res, next) => {
       scope: string;
     };
 
-    // Store tokens (using state as userId if provided, otherwise use a temp key)
-    const userId = (state as string) || 'temp-user';
-    const tokenKey = `${userId}-google`;
+    // Store tokens (using state as userId)
+    const callbackUserId = (state as string) || '';
+
+    if (!callbackUserId) {
+      console.error('Google OAuth callback: No user ID in state parameter');
+      res.redirect(`${config.corsOrigin}/integrations?error=no_user_state`);
+      return;
+    }
+
+    const tokenKey = `${callbackUserId}-google`;
+
+    console.log(`[Google OAuth] Storing tokens for user: ${callbackUserId}, key: ${tokenKey}`);
 
     tokenStore.set(tokenKey, {
       accessToken: tokens.access_token,
@@ -260,11 +271,13 @@ router.get('/google/callback', async (req, res, next) => {
 
     // Mark as connected
     connections.set(tokenKey, {
-      userId,
+      userId: callbackUserId,
       type: 'google',
       connected: true,
       lastSync: new Date().toISOString(),
     });
+
+    console.log(`[Google OAuth] Token stored successfully. TokenStore has key: ${tokenStore.has(tokenKey)}`);
 
     // Redirect to calendar page with success
     res.redirect(`${config.corsOrigin}/calendar?connected=google`);
@@ -285,6 +298,10 @@ router.get('/google/calendar/events', authenticate, async (req: AuthenticatedReq
 
     const tokenKey = `${userId}-google`;
     const tokens = tokenStore.get(tokenKey);
+
+    console.log(`[Google Calendar] Fetching events for user: ${userId}, tokenKey: ${tokenKey}`);
+    console.log(`[Google Calendar] TokenStore keys: ${Array.from(tokenStore.keys()).join(', ')}`);
+    console.log(`[Google Calendar] Token exists: ${!!tokens}`);
 
     if (!tokens) {
       next(createError('Google not connected. Please connect your Google account first.', 401));
