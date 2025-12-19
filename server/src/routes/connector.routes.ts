@@ -1100,6 +1100,13 @@ router.get('/microsoft/callback', async (req, res, next) => {
       scope: string;
     };
 
+    console.log(`[Microsoft OAuth] Token exchange successful`);
+    console.log(`[Microsoft OAuth] Granted scopes: ${tokens.scope}`);
+    console.log(`[Microsoft OAuth] Token type: ${tokens.token_type}`);
+    console.log(`[Microsoft OAuth] Expires in: ${tokens.expires_in}s`);
+    console.log(`[Microsoft OAuth] Access token length: ${tokens.access_token?.length}`);
+    console.log(`[Microsoft OAuth] Access token prefix: ${tokens.access_token?.substring(0, 30)}...`);
+
     const tokenKey = `${callbackUserId}-microsoft`;
 
     console.log(`[Microsoft OAuth] Storing tokens for user: ${callbackUserId}, key: ${tokenKey}`);
