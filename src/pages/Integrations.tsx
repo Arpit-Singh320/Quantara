@@ -123,7 +123,7 @@ export default function Integrations() {
   // Function to test Salesforce data fetch
   const testSalesforceData = async () => {
     console.log('[Integrations] Testing Salesforce data fetch...');
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('auth_token');
     console.log('[Integrations] JWT Token present:', !!token, token ? `(${token.substring(0, 20)}...)` : '(null)');
 
     if (!token) {
