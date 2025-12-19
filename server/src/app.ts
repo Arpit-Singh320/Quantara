@@ -28,11 +28,25 @@ const app = express();
 // Trust proxy for Railway (behind load balancer)
 app.set('trust proxy', 1);
 
-// Security middleware
-app.use(helmet());
-app.use(cors({
-  origin: config.corsOrigin,
+// CORS - MUST be before all other middleware
+// Handle preflight OPTIONS requests explicitly
+app.options('*', cors({
+  origin: [config.corsOrigin, 'https://quantara-three.vercel.app', 'http://localhost:8080'],
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
+
+app.use(cors({
+  origin: [config.corsOrigin, 'https://quantara-three.vercel.app', 'http://localhost:8080'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
+
+// Security middleware (after CORS)
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
 // Rate limiting
