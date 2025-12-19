@@ -35,6 +35,35 @@ interface EmailDialogProps {
   policyType: string;
   renewalId?: string;
   onSuccess?: () => void;
+  // Enhanced data for personalization
+  broker?: {
+    name: string;
+    title?: string;
+    company?: string;
+    phone?: string;
+    email?: string;
+  };
+  client?: {
+    contactName?: string;
+    contactEmail?: string;
+    contactPhone?: string;
+    companyName?: string;
+    industry?: string;
+  };
+  policy?: {
+    id?: string;
+    carrier?: string;
+    premium?: number;
+    coverage?: number;
+    expiryDate?: string;
+    daysUntilRenewal?: number;
+  };
+  activity?: {
+    emailsSent?: number;
+    quotes?: number;
+    lastTouch?: string;
+    riskLevel?: string;
+  };
 }
 
 const emailPurposes = [
@@ -58,6 +87,10 @@ export function EmailDialog({
   policyType,
   renewalId,
   onSuccess,
+  broker,
+  client,
+  policy,
+  activity,
 }: EmailDialogProps) {
   const [step, setStep] = useState<'select' | 'compose' | 'preview'>('select');
   const [purpose, setPurpose] = useState<string>('');
@@ -83,8 +116,12 @@ export function EmailDialog({
       const response = await api.generateEmail({
         clientName,
         policyType,
-        purpose: purpose as 'renewal_reminder' | 'follow_up' | 'quote_request' | 'meeting_request',
+        purpose: purpose as 'renewal_reminder' | 'follow_up' | 'quote_request' | 'meeting_request' | 'final_reminder' | 'welcome' | 'thank_you',
         tone: tone as 'formal' | 'friendly' | 'urgent',
+        broker,
+        client,
+        policy,
+        activity,
       });
 
       if (response.data?.email) {

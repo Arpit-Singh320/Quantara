@@ -707,6 +707,31 @@ export default function Index() {
           policyType={emailDialogRenewal.policy.type}
           renewalId={emailDialogRenewal.id}
           onSuccess={() => setEmailDialogRenewal(null)}
+          broker={{
+            name: 'Arpit Singh',
+            title: 'Senior Insurance Broker',
+            company: 'Quantara Insurance',
+            phone: '+1 (555) 123-4567',
+            email: 'arpit.singh@quantara.io',
+          }}
+          client={{
+            contactName: emailDialogRenewal.client.name,
+            contactEmail: emailDialogRenewal.client.email,
+            companyName: emailDialogRenewal.client.company,
+            industry: emailDialogRenewal.client.industry,
+          }}
+          policy={{
+            carrier: emailDialogRenewal.policy.carrier,
+            premium: emailDialogRenewal.policy.premium,
+            coverage: emailDialogRenewal.policy.coverage,
+            expiryDate: emailDialogRenewal.expiryDate,
+            daysUntilRenewal: emailDialogRenewal.daysUntilRenewal,
+          }}
+          activity={{
+            emailsSent: emailDialogRenewal.emailsSent || 0,
+            quotes: emailDialogRenewal.quotes || 0,
+            riskLevel: emailDialogRenewal.riskLevel,
+          }}
         />
       )}
     </div>

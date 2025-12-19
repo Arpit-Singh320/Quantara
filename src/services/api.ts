@@ -513,8 +513,37 @@ class ApiClient {
   async generateEmail(data: {
     clientName: string;
     policyType: string;
-    purpose: 'renewal_reminder' | 'follow_up' | 'quote_request' | 'meeting_request';
+    purpose: 'renewal_reminder' | 'follow_up' | 'quote_request' | 'meeting_request' | 'final_reminder' | 'welcome' | 'thank_you';
     tone?: 'formal' | 'friendly' | 'urgent';
+    broker?: {
+      name: string;
+      title?: string;
+      company?: string;
+      phone?: string;
+      email?: string;
+    };
+    client?: {
+      contactName?: string;
+      contactEmail?: string;
+      contactPhone?: string;
+      companyName?: string;
+      industry?: string;
+    };
+    policy?: {
+      id?: string;
+      carrier?: string;
+      premium?: number;
+      coverage?: number;
+      expiryDate?: string;
+      daysUntilRenewal?: number;
+    };
+    activity?: {
+      emailsSent?: number;
+      quotes?: number;
+      lastTouch?: string;
+      riskLevel?: string;
+    };
+    customInstructions?: string;
   }) {
     return this.request<{
       email: {

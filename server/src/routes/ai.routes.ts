@@ -62,10 +62,50 @@ const briefSchema = z.object({
 });
 
 const emailSchema = z.object({
+  // Required fields
   clientName: z.string(),
   policyType: z.string(),
-  purpose: z.enum(['renewal_reminder', 'follow_up', 'quote_request', 'meeting_request']),
+  purpose: z.enum(['renewal_reminder', 'follow_up', 'quote_request', 'meeting_request', 'final_reminder', 'welcome', 'thank_you']),
   tone: z.enum(['formal', 'friendly', 'urgent']).optional(),
+
+  // Broker information
+  broker: z.object({
+    name: z.string(),
+    title: z.string().optional(),
+    company: z.string().optional(),
+    phone: z.string().optional(),
+    email: z.string().optional(),
+  }).optional(),
+
+  // Detailed client information
+  client: z.object({
+    contactName: z.string().optional(),
+    contactEmail: z.string().optional(),
+    contactPhone: z.string().optional(),
+    companyName: z.string().optional(),
+    industry: z.string().optional(),
+  }).optional(),
+
+  // Policy details
+  policy: z.object({
+    id: z.string().optional(),
+    carrier: z.string().optional(),
+    premium: z.number().optional(),
+    coverage: z.number().optional(),
+    expiryDate: z.string().optional(),
+    daysUntilRenewal: z.number().optional(),
+  }).optional(),
+
+  // Activity context
+  activity: z.object({
+    emailsSent: z.number().optional(),
+    quotes: z.number().optional(),
+    lastTouch: z.string().optional(),
+    riskLevel: z.string().optional(),
+  }).optional(),
+
+  // Custom instructions
+  customInstructions: z.string().optional(),
 });
 
 // System prompts
@@ -110,11 +150,28 @@ Respond in valid JSON format matching this structure:
   "dataSources": [{"system": "string", "recordType": "string", "recordId": "string", "dataPoints": ["string"]}]
 }`,
 
-  email: `You are an AI assistant that drafts professional insurance broker emails.
-Generate emails that are:
-- Professional and appropriate for business communication
-- Personalized with client details
-- Clear about the purpose and any required actions
+  email: `You are a senior insurance broker's AI writing assistant with 15+ years of industry experience. Your role is to craft highly personalized, relationship-focused emails that drive action while maintaining professionalism.
+
+PERSONA & EXPERTISE:
+- You understand the insurance industry deeply: renewals, claims, underwriting, carrier relationships
+- You know that policy renewals are critical touchpoints for client retention
+- You recognize urgency levels based on days until expiry
+- You personalize every email with specific client data, policy details, and relationship context
+
+EMAIL WRITING PRINCIPLES:
+1. PERSONALIZATION: Use the client's name, company, specific policy details, and dates
+2. URGENCY CALIBRATION: Adjust tone based on days until renewal (30+ days = friendly, 7-30 days = focused, <7 days = urgent)
+3. VALUE PROPOSITION: Remind clients of the protection value, not just the transaction
+4. CLEAR CTA: Every email must have a specific, actionable next step
+5. RELATIONSHIP BUILDING: Reference previous interactions when available
+6. PROFESSIONAL SIGNATURE: Include broker's full contact details
+
+EMAIL STRUCTURE:
+- Subject: Specific, includes company name and policy type, creates urgency if needed
+- Opening: Personalized greeting with relationship acknowledgment
+- Body: Context + Value + Urgency + Consequences of inaction
+- CTA: Specific action with deadline
+- Closing: Professional sign-off with full contact details
 
 Respond in valid JSON format:
 {
@@ -323,17 +380,82 @@ router.post('/email', strictRateLimiter, async (req: AuthenticatedRequest, res: 
     const genAI = getGeminiClient();
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-    const purposeDescriptions = {
-      renewal_reminder: 'Remind the client about their upcoming policy renewal',
-      follow_up: 'Follow up on a previous conversation or quote',
-      quote_request: 'Request information needed to prepare renewal quotes',
-      meeting_request: 'Request a meeting to discuss the renewal',
+    const purposeDescriptions: Record<string, string> = {
+      renewal_reminder: 'Remind the client about their upcoming policy renewal with specific details about their coverage and the importance of continuous protection',
+      follow_up: 'Follow up on a previous conversation or quote, referencing any prior interactions',
+      quote_request: 'Request information needed to prepare renewal quotes, being specific about what data is needed',
+      meeting_request: 'Request a meeting to discuss the renewal, proposing specific times',
+      final_reminder: 'Send a final, urgent reminder about the policy expiring very soon with consequences of lapse',
+      welcome: 'Welcome a new client and introduce your services',
+      thank_you: 'Thank the client for their continued business and trust',
     };
 
-    const prompt = `Draft a ${data.tone || 'friendly'} email for: ${purposeDescriptions[data.purpose]}
+    // Build comprehensive context for the AI
+    const brokerInfo = data.broker ? `
+BROKER INFORMATION (use in signature):
+- Name: ${data.broker.name}
+- Title: ${data.broker.title || 'Insurance Broker'}
+- Company: ${data.broker.company || 'Quantara Insurance'}
+- Phone: ${data.broker.phone || ''}
+- Email: ${data.broker.email || ''}` : '';
 
-Client: ${data.clientName}
-Policy Type: ${data.policyType}`;
+    const clientInfo = data.client ? `
+CLIENT DETAILS:
+- Contact Person: ${data.client.contactName || data.clientName}
+- Company: ${data.client.companyName || 'N/A'}
+- Email: ${data.client.contactEmail || 'N/A'}
+- Phone: ${data.client.contactPhone || 'N/A'}
+- Industry: ${data.client.industry || 'N/A'}` : '';
+
+    const policyInfo = data.policy ? `
+POLICY DETAILS:
+- Policy ID: ${data.policy.id || 'N/A'}
+- Insurance Carrier: ${data.policy.carrier || 'N/A'}
+- Annual Premium: $${data.policy.premium?.toLocaleString() || 'N/A'}
+- Coverage Amount: $${data.policy.coverage?.toLocaleString() || 'N/A'}
+- Expiry Date: ${data.policy.expiryDate || 'N/A'}
+- Days Until Renewal: ${data.policy.daysUntilRenewal ?? 'N/A'}` : '';
+
+    const activityInfo = data.activity ? `
+RELATIONSHIP CONTEXT:
+- Previous Emails Sent: ${data.activity.emailsSent ?? 0}
+- Quotes Provided: ${data.activity.quotes ?? 0}
+- Last Contact: ${data.activity.lastTouch || 'No recent contact'}
+- Risk Level: ${data.activity.riskLevel || 'Medium'}` : '';
+
+    const urgencyGuidance = data.policy?.daysUntilRenewal !== undefined ? `
+URGENCY CALIBRATION:
+${data.policy.daysUntilRenewal <= 3 ? '🚨 CRITICAL: Policy expires in ' + data.policy.daysUntilRenewal + ' days! Use URGENT tone, emphasize coverage lapse consequences.' :
+  data.policy.daysUntilRenewal <= 7 ? '⚠️ HIGH URGENCY: Less than a week remaining. Be direct about deadline.' :
+  data.policy.daysUntilRenewal <= 14 ? '📅 MODERATE: Two weeks left. Friendly but focused on action.' :
+  data.policy.daysUntilRenewal <= 30 ? '📋 STANDARD: Routine reminder with clear next steps.' :
+  '✅ EARLY: Plenty of time. Build relationship, discuss options.'}` : '';
+
+    const customInstructions = data.customInstructions ? `
+SPECIAL INSTRUCTIONS:
+${data.customInstructions}` : '';
+
+    const prompt = `Draft a highly personalized ${data.tone || 'friendly'} email for: ${purposeDescriptions[data.purpose] || data.purpose}
+
+PRIMARY RECIPIENT:
+- Name: ${data.clientName}
+- Policy Type: ${data.policyType}
+${brokerInfo}
+${clientInfo}
+${policyInfo}
+${activityInfo}
+${urgencyGuidance}
+${customInstructions}
+
+REQUIREMENTS:
+1. Use ALL available data points to personalize the email
+2. Address the recipient by their first name (${data.client?.contactName?.split(' ')[0] || data.clientName.split(' ')[0]})
+3. Reference specific policy details (carrier, premium, coverage, expiry date)
+4. Include a clear call-to-action with a specific deadline
+5. Sign off with the broker's full contact information
+6. Make the email feel personal, not templated
+7. If this is a renewal reminder, emphasize the value of continuous protection
+8. Reference the relationship context if previous interactions exist`;
 
     const result = await model.generateContent([
       { text: SYSTEM_PROMPTS.email },
