@@ -1241,16 +1241,28 @@ router.get('/microsoft/calendar/events', authenticate, async (req: Authenticated
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      console.error('[Microsoft Calendar] Failed to fetch events:', error);
+      const errorText = await response.text();
+      console.error('[Microsoft Calendar] Failed to fetch events. Status:', response.status);
+      console.error('[Microsoft Calendar] Error body:', errorText);
+      console.error('[Microsoft Calendar] Token prefix:', tokens.accessToken.substring(0, 50) + '...');
 
+      // Try to parse error for more details
+      try {
+        const errorJson = JSON.parse(errorText);
+        console.error('[Microsoft Calendar] Error code:', errorJson.error?.code);
+        console.error('[Microsoft Calendar] Error message:', errorJson.error?.message);
+      } catch (e) {
+        // Not JSON
+      }
+
+      // Only revoke on actual 401, not on other errors
       if (response.status === 401) {
         await deleteTokenFromDb(userId, 'microsoft');
         next(createError('Microsoft session expired. Please reconnect.', 401));
         return;
       }
 
-      next(createError('Failed to fetch calendar events', 500));
+      next(createError(`Failed to fetch calendar events: ${response.status}`, 500));
       return;
     }
 
