@@ -15,6 +15,8 @@ import { SourceIcon, SourceBadge, getSourceConfig } from '@/components/common/So
 import { Skeleton, SkeletonCard, SkeletonText, SkeletonChart } from '@/components/common/Skeleton';
 import { mockChatHistory, suggestedQuestions, mockAgendaItems, mockTalkingPoints, mockEmailTemplates } from '@/data/brokerData';
 import { EmailDialog } from '@/components/dialogs/EmailDialog';
+import { ComplianceBanner } from '@/components/ComplianceBanner';
+import { ConnectorStatus } from '@/components/ConnectorStatus';
 import { ChatMessage, Source, SourceType, MeetingAgendaItem, TalkingPoint } from '@/types/broker';
 import { useRenewals, Renewal as APIRenewal, RenewalSummary } from '@/hooks/useRenewals';
 import { useClients } from '@/hooks/useClients';
@@ -668,6 +670,7 @@ export default function Index() {
       <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
       <div className={cn('transition-all duration-300', sidebarCollapsed ? 'ml-16' : 'ml-56')}>
         <Header onOpenSearch={() => setIsCommandOpen(true)} onOpenChat={() => setIsChatOpen(true)} />
+        <ComplianceBanner variant="compact" />
         <main className="p-6">
           <StatsCards summary={summary} clientCount={clients.length} policyCount={policies.length} />
           <div className="flex flex-col xl:flex-row gap-6">
@@ -685,6 +688,7 @@ export default function Index() {
               )}
             </div>
             <aside className="w-full xl:w-80 space-y-4">
+              <ConnectorStatus variant="compact" />
               <RiskChart summary={summary} />
               <RevenueChart totalPremium={summary?.totalPremium || 0} renewals={dashboardRenewals} />
               <TimelineChart renewals={filteredRenewals} />
